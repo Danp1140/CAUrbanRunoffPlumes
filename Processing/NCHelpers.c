@@ -195,7 +195,14 @@ GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs) {
 	return (GeoCoord){lhs->lat - rhs->lat, lhs->lon - rhs->lon};
 }
 
-size_t* memData(MemCoord* m) {return &m->x;}
+size_t* memData(MemCoord* m) {return &m->y;}
+
+GeoCoord memToGeo(MemCoord m, int geogroup, int latvar, int lonvar) {
+	GeoCoord result;
+	nc_get_var1_float(geogroup, latvar, memData(&m), &result.lat);
+	nc_get_var1_float(geogroup, lonvar, memData(&m), &result.lon);
+	return result;
+}
 
 MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar) {
 	MemCoord bounds;
@@ -215,8 +222,10 @@ MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar) {
 	do {
 		nc_get_var1_float(geogroup, latvar, memData(&guess), &currentGeo.lat);
 		nc_get_var1_float(geogroup, lonvar, memData(&guess), &currentGeo.lon);
+		/*
 		printf("new guess (%d, %d)\n", guess.x, guess.y);
 		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
+		*/
 
 		guess.x++;
 		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmx.lat);
@@ -230,8 +239,10 @@ MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar) {
 		guess.y--;
 		dgdmy = geoSub(&dgdmy, &currentGeo);
 
+		/*
 		printf("dg/dm_x = (%f, %f)\n", dgdmx.lat, dgdmx.lon);
 		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
+		*/
 
 		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
 		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
@@ -240,6 +251,57 @@ MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar) {
 		guess.y += inc > 0 ? ceil(inc) : floor(inc);
 	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
 	return guess;
+}
+
+MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar) {
+	MemCoord bounds;
+	int ndims;
+	nc_inq_varndims(geogroup, latvar, &ndims);
+	int dimids[ndims];
+	nc_inq_vardimid(geogroup, latvar, &dimids[0]);
+	size_t dimlen;
+	// for some reason y is stored before x
+	nc_inq_dimlen(geogroup, dimids[0], &dimlen);
+	bounds.y = dimlen;
+	nc_inq_dimlen(geogroup, dimids[1], &dimlen);
+	bounds.x = dimlen;
+
+	// guess stores y first, then x
+	float guess[2] = {(float)bounds.x / 2., (float)bounds.y / 2.};
+	// for access
+	MemCoord guessmem;
+	GeoCoord currentGeo, dgdmx, dgdmy;
+	do {
+		guessmem = (MemCoord){(size_t)guess[0], (size_t)guess[1]};
+		nc_get_var1_float(geogroup, latvar, memData(&guessmem), &currentGeo.lat);
+		nc_get_var1_float(geogroup, lonvar, memData(&guessmem), &currentGeo.lon);
+		/*
+		printf("new guess (%f, %f)\n", guess[1], guess[0]);
+		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
+		*/
+
+		guessmem = (MemCoord){guess[0], guess[1] + GEO_TO_MEM2_STEP};
+		nc_get_var1_float(geogroup, latvar, memData(&guessmem), &dgdmx.lat);
+		nc_get_var1_float(geogroup, lonvar, memData(&guessmem), &dgdmx.lon);
+		dgdmx = geoSub(&dgdmx, &currentGeo);
+
+		guessmem = (MemCoord){guess[0] + GEO_TO_MEM2_STEP, guess[1]};
+		nc_get_var1_float(geogroup, latvar, memData(&guessmem), &dgdmy.lat);
+		nc_get_var1_float(geogroup, lonvar, memData(&guessmem), &dgdmy.lon);
+		dgdmy = geoSub(&dgdmy, &currentGeo);
+
+		/*
+		printf("dg/dm_x = (%f, %f)\n", dgdmx.lat, dgdmx.lon);
+		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
+		*/
+
+		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
+		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
+		guess[1] += inc;
+		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
+		guess[0] += inc;
+	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
+	return (MemCoord){guess[0], guess[1]};
 }
 
 char** formulateMYDATML2URLs(uint16_t year, uint8_t month, uint8_t day, size_t* numurls) {

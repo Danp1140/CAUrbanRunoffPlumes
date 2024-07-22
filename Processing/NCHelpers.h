@@ -8,14 +8,15 @@
 #include </usr/local/include/curl/curl.h>
 
 #define MAX_CSV_ENTRY_LEN 128
-#define GEO_TO_MEM_MAX_ERR 1e-3
+#define GEO_TO_MEM_MAX_ERR 1e-2
+#define GEO_TO_MEM2_STEP 1. // must be >= 1
 
 typedef struct GeoCoord {
 	float lat, lon;
 } GeoCoord;
 
 typedef struct MemCoord {
-	size_t x, y;
+	size_t y, x;
 } MemCoord;
 
 typedef struct CSVScanData {
@@ -52,7 +53,12 @@ GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs);
 
 size_t* memData(MemCoord* m);
 
+GeoCoord memToGeo(MemCoord m, int geogroup, int latvar, int lonvar);
+
 MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar);
+
+// geoToMem2 uses a float version of MemCoord internally to support sub-pixel steps
+MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar);
 
 char** formulateMYDATML2URLs(uint16_t year, uint8_t month, uint8_t day, size_t* numurls);
 
