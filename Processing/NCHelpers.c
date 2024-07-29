@@ -197,44 +197,66 @@ GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs) {
 
 size_t* memData(MemCoord* m) {return &m->y;}
 
-GeoCoord memToGeo(MemCoord m, int geogroup, int latvar, int lonvar) {
+GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar) {
 	GeoCoord result;
-	nc_get_var1_float(geogroup, latvar, memData(&m), &result.lat);
+	// TODO: add way to determine appropriate dims
+	nc_get_var1_float(geogroup, latvar, memData(&m) + 1, &result.lat);
 	nc_get_var1_float(geogroup, lonvar, memData(&m), &result.lon);
 	return result;
 }
 
-MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar) {
-	MemCoord bounds;
-	int ndims;
-	nc_inq_varndims(geogroup, latvar, &ndims);
-	int dimids[ndims];
-	nc_inq_vardimid(geogroup, latvar, &dimids[0]);
-	size_t dimlen;
-	// for some reason y is stored before x
-	nc_inq_dimlen(geogroup, dimids[0], &dimlen);
-	bounds.y = dimlen;
-	nc_inq_dimlen(geogroup, dimids[1], &dimlen);
-	bounds.x = dimlen;
+GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f) {
+	return _memToGeo(m, f->geogroupid, f->latvarid, f->lonvarid);
+}
 
-	MemCoord guess = {bounds.x / 2, bounds.y / 2};
+MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int lonvar) {
+	MemCoord bounds;
+	int nlatdims, nlondims;
+	nc_inq_varndims(geogroup, latvar, &nlatdims);
+	nc_inq_varndims(geogroup, lonvar, &nlondims);
+	int latdimids[nlatdims], londimids[nlondims];
+	nc_inq_vardimid(geogroup, latvar, &latdimids[0]);
+	nc_inq_vardimid(geogroup, lonvar, &londimids[0]);
+	size_t offset = 0;
+	if (nlatdims == nlondims) {
+		size_t dimlen;
+		if (nlatdims == 2) {
+			// for some reason y is stored before x
+			// this assumes dims are always stored y-res @ 0, x-res @ 1
+			nc_inq_dimlen(geogroup, latdimids[0], &dimlen);
+			bounds.y = dimlen;
+			nc_inq_dimlen(geogroup, latdimids[1], &dimlen);
+			bounds.x = dimlen;
+		}
+		// if ndims == 1, we'll assume a L3SMI-style lin indep lat & lon
+		else if (nlatdims == 1) {
+			offset = 1;
+			nc_inq_dimlen(geogroup, latdimids[0], &dimlen);
+			bounds.y = dimlen;
+			nc_inq_dimlen(geogroup, londimids[0], &dimlen);
+			bounds.x = dimlen;
+		}
+	}
+	else {
+		printf("unknown lat/lon dimension format in geoToMem!!\n");
+	}
+
+	MemCoord guess = {bounds.y / 2, bounds.x / 2};
 	GeoCoord currentGeo, dgdmx, dgdmy;
 	do {
-		nc_get_var1_float(geogroup, latvar, memData(&guess), &currentGeo.lat);
+		nc_get_var1_float(geogroup, latvar, memData(&guess) + offset, &currentGeo.lat);
 		nc_get_var1_float(geogroup, lonvar, memData(&guess), &currentGeo.lon);
-		/*
-		printf("new guess (%d, %d)\n", guess.x, guess.y);
+		printf("new guess (%zu, %zu)\n", guess.x, guess.y);
 		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
-		*/
 
 		guess.x++;
-		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmx.lat);
+		nc_get_var1_float(geogroup, latvar, memData(&guess) + offset, &dgdmx.lat);
 		nc_get_var1_float(geogroup, lonvar, memData(&guess), &dgdmx.lon);
 		guess.x--;
 		dgdmx = geoSub(&dgdmx, &currentGeo);
 
 		guess.y++;
-		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmy.lat);
+		nc_get_var1_float(geogroup, latvar, memData(&guess) + offset, &dgdmy.lat);
 		nc_get_var1_float(geogroup, lonvar, memData(&guess), &dgdmy.lon);
 		guess.y--;
 		dgdmy = geoSub(&dgdmy, &currentGeo);
@@ -251,6 +273,10 @@ MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar) {
 		guess.y += inc > 0 ? ceil(inc) : floor(inc);
 	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
 	return guess;
+}
+
+MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
+	return _geoToMem(g, f->geogroupid, f->latvarid, f->lonvarid);
 }
 
 MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar) {

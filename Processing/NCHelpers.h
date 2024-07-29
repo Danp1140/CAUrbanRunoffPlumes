@@ -8,7 +8,7 @@
 #include </usr/local/include/curl/curl.h>
 
 #define MAX_CSV_ENTRY_LEN 128
-#define GEO_TO_MEM_MAX_ERR 1e-2
+#define GEO_TO_MEM_MAX_ERR 0.01 // generous error, due to L3SMI's resolution
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 
 typedef struct GeoCoord {
@@ -23,6 +23,10 @@ typedef struct CSVScanData {
 	char word[MAX_CSV_ENTRY_LEN];
 	float min, max;
 } CSVScanData;
+
+typedef struct GeoLocNCFile {
+	int fileid, geogroupid, latvarid, lonvarid;
+} GeoLocNCFile;
 
 // Note: this only prints attributes for variables, not for groups
 void printInfo(int id, int printattribs);
@@ -53,9 +57,14 @@ GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs);
 
 size_t* memData(MemCoord* m);
 
-GeoCoord memToGeo(MemCoord m, int geogroup, int latvar, int lonvar);
+GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar);
 
-MemCoord geoToMem(GeoCoord g, int geogroup, int latvar, int lonvar);
+GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f);
+
+// TODO: phase out in favor of below version using GeoLocNCFile arg (same with memToGeo)
+MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int lonvar);
+
+MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f);
 
 // geoToMem2 uses a float version of MemCoord internally to support sub-pixel steps
 MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar);
