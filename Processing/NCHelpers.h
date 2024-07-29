@@ -8,7 +8,7 @@
 #include </usr/local/include/curl/curl.h>
 
 #define MAX_CSV_ENTRY_LEN 128
-#define GEO_TO_MEM_MAX_ERR 0.01 // generous error, due to L3SMI's resolution
+#define GEO_TO_MEM_MAX_ERR 0.05 // generous error, due to L3SMI's resolution
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 
 typedef struct GeoCoord {

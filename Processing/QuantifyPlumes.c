@@ -77,14 +77,13 @@ int main(int argc, char** argv) {
 	 * pixels are projected to have linearly indep lat/lon
 	 */
 
-	// MemCoord m = geoToMem((GeoCoord){34, -120}, gll3smifiles[0]);
+	// MemCoord m = geoToMem((GeoCoord){33, -120}, &gll3smifiles[0]);
 
-	/*
 	size_t n;
-	MemCoord* larivercr = calcCutoffRaster(&examplenc, ncid, 0, -118.1, &lariver, STUDY_AREA_RADIUS, &n);
+	MemCoord* larivercr = calcCutoffRaster(&gll3smifiles[0], gll3smifiles[0].geogroupid, L3SMI_LON_ID, -119.5, &lariver, STUDY_AREA_RADIUS, &n);
 
 	if (larivercr) free(larivercr);
-	*/
+
 	for (uint8_t i = 0; i < numl3smifiles; i++) {
 		nc_close(l3smifiles[i]);
 	}
@@ -101,7 +100,7 @@ int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, u
 	char template[strlen(prefix) + strlen(DATE_PATH_FORMAT)];
 	strcpy(&template[0], prefix);
 	strcpy(&template[strlen(prefix)], DATE_PATH_FORMAT);
-	// allocs dir of max length, some chars may not be used due to 1 and 2 digit days and months
+	// allocs dir of max length, some chars may not be used due to 1 digit days and months
 	char dirpath[strlen(prefix) + 5 + 3 + 3];
 	sprintf(dirpath, template, year, month, day);
 

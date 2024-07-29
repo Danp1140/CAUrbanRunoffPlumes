@@ -244,20 +244,22 @@ MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int l
 	MemCoord guess = {bounds.y / 2, bounds.x / 2};
 	GeoCoord currentGeo, dgdmx, dgdmy;
 	do {
-		nc_get_var1_float(geogroup, latvar, memData(&guess) + offset, &currentGeo.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guess), &currentGeo.lon);
+		nc_get_var1_float(geogroup, latvar, memData(&guess), &currentGeo.lat);
+		nc_get_var1_float(geogroup, lonvar, memData(&guess) + offset, &currentGeo.lon);
+		/*
 		printf("new guess (%zu, %zu)\n", guess.x, guess.y);
 		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
+		*/
 
 		guess.x++;
-		nc_get_var1_float(geogroup, latvar, memData(&guess) + offset, &dgdmx.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guess), &dgdmx.lon);
+		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmx.lat);
+		nc_get_var1_float(geogroup, lonvar, memData(&guess) + offset, &dgdmx.lon);
 		guess.x--;
 		dgdmx = geoSub(&dgdmx, &currentGeo);
 
 		guess.y++;
-		nc_get_var1_float(geogroup, latvar, memData(&guess) + offset, &dgdmy.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guess), &dgdmy.lon);
+		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmy.lat);
+		nc_get_var1_float(geogroup, lonvar, memData(&guess) + offset, &dgdmy.lon);
 		guess.y--;
 		dgdmy = geoSub(&dgdmy, &currentGeo);
 
