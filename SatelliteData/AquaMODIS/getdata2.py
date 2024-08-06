@@ -15,6 +15,8 @@ L3FolderPrefix = "L3SMI/"
 MYD09GAAPIURL = "https://ladsweb.modaps.eosdis.nasa.gov/api/v1/files/product=MYD09GA&collection=61&areaOfInterest=x-121y32,x-116y35&dateRanges=" 
 MYD09GAFolderPrefix = "MYD09GA/"
 
+MYD09APIURL = "https://ladsweb.modaps.eosdis.nasa.gov/api/v1/files/product=MYD09&collection=61&areaOfInterest=x-121y32,x-116y35&dateRanges="
+
 def addDateRange(year, month, day):
     return cloudAPIURL + str(year) + "-" + str(month).zfill(2) + "-" + str(day).zfill(2)
 
@@ -92,7 +94,6 @@ def downloadMYD09GAForDay(year, month, day):
             output.write(binresp.read()) 
 
 
-
 def downloadL3SMIForDay(year, month, day):
     url = getL3DownloadURL(year, month, day);
     try:
@@ -105,6 +106,28 @@ def downloadL3SMIForDay(year, month, day):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, 'wb') as output:
         output.write(response.read())
+
+def downloadLAADSForDay(year, month, day, apiurl, folderprefix, latname, lonname, varname):
+    try:
+        response = urllib.request.urlopen(addDateRangeToAPIURL(apiurl, year, month, day))
+    except urllib.error.HTTPError as err:
+        logHTTPError(err)   
+        return
+    try:
+        jsonresp = json.loads(response.read().decode())
+    except:
+        logError(str(datetime.datetime.now()) + " | JSON didn't work out, probably got an empty response back\nWas working on " + str(year) + "/" + str(month) + "/" + str(day) + "\nFrom decoded response:\n"
+                 + response.read().decode() + "\n")
+    for key in jsonresp:
+        try:
+            binresp = urllib.request.urlopen(downloadURLPrefix + jsonresp[key]["fileURL"][9:] + ".nc4?" + latname + "," + lonname + "," + varname)
+        except urllib.error.HTTPError as err:
+            logHTTPError(err)
+            continue
+        filepath = folderprefix + str(year) + "/" + str(month) + "/" + str(day) + "/" + jsonresp[key]["name"] + ".nc4"
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, 'wb') as output:
+            output.write(binresp.read()) 
 
 
 def downloadForRainDays():
@@ -136,12 +159,15 @@ def downloadForRainDaysPlusN(n):
                 x[1] = "0" + x[1]
             if len(x[2]) == 2:
                 x[2] = "20" + x[2]
+            if x[2] != "2004":
+                continue;
             d = datetime.datetime(int(x[2]), int(x[0]), int(x[1])) 
             for i in range(0, n):
                 di = d + datetime.timedelta(days=i)
                 if di not in downloaded:
                     downloaded.append(di)
-                    downloadMYD09GAForDay(di.year, di.month, di.day)
+                    # downloadMYD09GAForDay(di.year, di.month, di.day)
+                    downloadLAADSForDay(di.year, di.month, di.day, MYD09APIURL, "MYD09/", "Latitude", "Longitude", "_1km_Surface_Reflectance_Band_12");
 
 
 # downloadForRainDays()

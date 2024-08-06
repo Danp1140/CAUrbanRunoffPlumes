@@ -1,5 +1,37 @@
 #include "NCHelpers.h"
 
+const float GEO_HASH_A = GEO_HASH_LAT_MAX * GEO_HASH_SIZE / 2.0 / GEO_HASH_LAT_EXT + GEO_HASH_LON_MAX * GEO_HASH_SIZE / 2.0 / GEO_HASH_LON_EXT;
+const float GEO_HASH_B = GEO_HASH_SIZE / 2.0 / GEO_HASH_LAT_EXT;
+const float GEO_HASH_C = GEO_HASH_SIZE / 2.0 / GEO_HASH_LON_EXT;
+
+
+void initBakedFile(BakedGeoLocNCFile* f) {
+	f->pairs = (MemGeoPair*)malloc((size_t)GEO_HASH_SIZE * sizeof(MemGeoPair));
+	memset(f->pairs, 0, (size_t)GEO_HASH_SIZE * sizeof(MemGeoPair));
+}
+
+size_t hash(const GeoCoord* g) {
+	// this would need two float to size_t casts anyway for each g coord
+	return (size_t)(GEO_HASH_A - g->lat * GEO_HASH_B + g->lon * GEO_HASH_C);
+}
+
+void push(BakedGeoLocNCFile* f, MemGeoPair p) {
+	size_t h = hash(&p.g);
+	while (f->pairs[h].g.lat != 0) { // zeroed out coords implies empty cell
+		if (h == 0) h = (size_t)GEO_HASH_SIZE;
+		h--;
+	}
+	f->pairs[h] = p;
+}
+
+MemCoord find(const BakedGeoLocNCFile* f, const GeoCoord g) {
+	size_t h = hash(&g);
+	while (f->pairs[h].g.lat != g.lat || f->pairs[h].g.lon != g.lon) {
+		h--;
+	}
+	return f->pairs[h].m;
+}
+
 void printInfo(int id, int printattribs) {
 	char name[NC_MAX_NAME];
 
@@ -200,7 +232,8 @@ size_t* memData(MemCoord* m) {return &m->y;}
 GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar) {
 	GeoCoord result;
 	// TODO: add way to determine appropriate dims
-	nc_get_var1_float(geogroup, latvar, memData(&m) + 1, &result.lat);
+	// likely best to store offset/dim data in GeoLoc struct to avoid repeated inq calls
+	nc_get_var1_float(geogroup, latvar, memData(&m), &result.lat);
 	nc_get_var1_float(geogroup, lonvar, memData(&m), &result.lon);
 	return result;
 }
@@ -278,7 +311,79 @@ MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int l
 }
 
 MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
-	return _geoToMem(g, f->geogroupid, f->latvarid, f->lonvarid);
+	MemCoord bounds;
+	int nlatdims, nlondims;
+	nc_inq_varndims(f->geogroupid, f->latvarid, &nlatdims);
+	nc_inq_varndims(f->geogroupid, f->lonvarid, &nlondims);
+	int latdimids[nlatdims], londimids[nlondims];
+	nc_inq_vardimid(f->geogroupid, f->latvarid, &latdimids[0]);
+	nc_inq_vardimid(f->geogroupid, f->lonvarid, &londimids[0]);
+	size_t offset = 0;
+	if (nlatdims == nlondims) {
+		size_t dimlen;
+		if (nlatdims == 2) {
+			// for some reason y is stored before x
+			// this assumes dims are always stored y-res @ 0, x-res @ 1
+			nc_inq_dimlen(f->geogroupid, latdimids[0], &dimlen);
+			bounds.y = dimlen;
+			nc_inq_dimlen(f->geogroupid, latdimids[1], &dimlen);
+			bounds.x = dimlen;
+		}
+		// if ndims == 1, we'll assume a L3SMI-style lin indep lat & lon
+		else if (nlatdims == 1) {
+			offset = 1;
+			nc_inq_dimlen(f->geogroupid, latdimids[0], &dimlen);
+			bounds.y = dimlen;
+			nc_inq_dimlen(f->geogroupid, londimids[0], &dimlen);
+			bounds.x = dimlen;
+		}
+	}
+	else {
+		printf("unknown lat/lon dimension format in geoToMem!!\n");
+	}
+
+	MemCoord guess = {bounds.y / 2, bounds.x / 2};
+	GeoCoord currentGeo, dgdmx, dgdmy;
+	do {
+		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &currentGeo.lat);
+		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &currentGeo.lon);
+		/*
+		printf("new guess (%zu, %zu)\n", guess.x, guess.y);
+		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
+		*/
+
+		guess.x++;
+		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &dgdmx.lat);
+		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &dgdmx.lon);
+		guess.x--;
+		dgdmx = geoSub(&dgdmx, &currentGeo);
+
+		guess.y++;
+		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &dgdmy.lat);
+		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &dgdmy.lon);
+		guess.y--;
+		dgdmy = geoSub(&dgdmy, &currentGeo);
+
+		/*
+		printf("dg/dm_x = (%f, %f)\n", dgdmx.lat, dgdmx.lon);
+		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
+		*/
+
+		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
+		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
+		guess.x += inc > 0 ? ceil(inc) : floor(inc);
+		if (guess.x < 0 || guess.x > f->bounds.x) {
+			guess = (MemCoord){-1u, -1u};
+			break;
+		}
+		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
+		guess.y += inc > 0 ? ceil(inc) : floor(inc);
+		if (guess.y < 0 || guess.y > f->bounds.y) {
+			guess = (MemCoord){-1u, -1u};
+			break;
+		}
+	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
+	return guess;
 }
 
 MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar) {
@@ -368,3 +473,5 @@ uint16_t getYearDay(uint16_t year, uint8_t month, uint8_t monthday) {
 	if (month != 11) ydaytotal += 30;
 	return ydaytotal;
 }
+
+

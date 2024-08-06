@@ -8,7 +8,8 @@ sariver = (33.63, -117.96)
 bcreek = (33.96, -118.46)
 
 SQUARE_WIDTH = 0.2 # in degrees
-RESIDUAL_DAYS = 10 # download this many extra days after rainy day
+RESIDUAL_DAYS = 5 # download this many extra days after rainy day
+# RESIDUAL_DAYS extra long in case we dont have super recent Sentinel coverage
 
 # gives a generous spatial extent for load_collection based on SQUARE_WIDTH
 def generateSpatialExt(center):
@@ -32,13 +33,12 @@ def getDataCube(connection, name, bands, year, month, day, site):
     if name == "SENTINEL1_GRD":
         print("sentinel1")
         cube = cube.sar_backscatter(coefficient='sigma0-ellipsoid')
-    """
+    cube.filter_bbox(bbox=generateSpatialExt(site))
     print(name)
     print(generateSpatialExt(site))
     print(generateTemporalExt(year, month, day))
     print(generateTemporalExt(end.year, end.month, end.day))
     print(bands)
-    """
     return cube
     
 

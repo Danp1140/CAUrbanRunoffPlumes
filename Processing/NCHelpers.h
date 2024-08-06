@@ -8,7 +8,9 @@
 #include </usr/local/include/curl/curl.h>
 
 #define MAX_CSV_ENTRY_LEN 128
-#define GEO_TO_MEM_MAX_ERR 0.05 // generous error, due to L3SMI's resolution
+#define GEO_TO_MEM_MAX_ERR 0.2 // generous error, due to L3SMI's resolution
+				// TODO: error as a param, so we can have per-product (per-resolution)
+				// error tolerance
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 
 typedef struct GeoCoord {
@@ -25,8 +27,36 @@ typedef struct CSVScanData {
 } CSVScanData;
 
 typedef struct GeoLocNCFile {
-	int fileid, geogroupid, latvarid, lonvarid;
+	int fileid, geogroupid, latvarid, lonvarid, keyvarid;
+	uint16_t scale; // m/px
+	MemCoord bounds;
 } GeoLocNCFile;
+
+typedef struct MemGeoPair {
+	MemCoord m;
+	GeoCoord g;
+} MemGeoPair;
+
+#define GEO_HASH_SIZE 6250000.0 // largest we expect is 2500 * 2500
+#define GEO_HASH_LAT_MAX 35.0
+#define GEO_HASH_LAT_EXT 3.0 // diff between max & min
+#define GEO_HASH_LON_MAX 121.0 // inverting lon to keep things positive
+#define GEO_HASH_LON_EXT 3.0
+
+const float GEO_HASH_A, GEO_HASH_B, GEO_HASH_C;
+
+typedef struct BakedGeoLocNCFile {
+	GeoLocNCFile child;
+	MemGeoPair* pairs; 
+} BakedGeoLocNCFile;
+
+void initBakedFile(BakedGeoLocNCFile* f);
+
+size_t hash(const GeoCoord* g);
+
+void push(BakedGeoLocNCFile* f, MemGeoPair p);
+
+MemCoord find(const BakedGeoLocNCFile* f, const GeoCoord g);
 
 // Note: this only prints attributes for variables, not for groups
 void printInfo(int id, int printattribs);
@@ -56,6 +86,8 @@ float geoDot(const GeoCoord* const g1, const GeoCoord* const g2);
 GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs);
 
 size_t* memData(MemCoord* m);
+
+// TODO: add out-of-range checks for memToGeo & geoToMem
 
 GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar);
 
