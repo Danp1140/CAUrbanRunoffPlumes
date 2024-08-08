@@ -5,7 +5,7 @@ import subprocess
 
 def processForRainDaysPlusN(n):
     processed = []
-    log = open("process-log-" + str(datetime.datetime.now()), 'w')
+    log = open("process-log-" + str(datetime.datetime.now()) + ".txt", 'w')
     with open("../SatelliteData/AquaMODIS/LAXPrcpDataTemp.csv") as csvfile:
         for row in csv.reader(csvfile):
             x = re.split("/", row[0])
@@ -25,7 +25,9 @@ def processForRainDaysPlusN(n):
                 if di not in processed:
                     processed.append(di)
                     print("Processing " + str(di))
-                    subprocess.run(["./QuantifyPlumes", x[2], x[0], x[1]], stdout=log)
+                    subprocess.run(["./QuantifyPlumes", str(di.year), str(di.month), str(di.day)], stdout=log)
     log.close()
 
-processForRainDaysPlusN(1)
+subprocess.run(["rm", "-r", "2004/"])
+subprocess.run(["mkdir", "2004"])
+processForRainDaysPlusN(3)

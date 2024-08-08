@@ -9,7 +9,7 @@
 
 #define MAX_CSV_ENTRY_LEN 128
 #define GEO_TO_MEM_MAX_ERR_ATML2 0.2 
-#define GEO_TO_MEM_MAX_ERR_MYD09GA 0.2 
+#define GEO_TO_MEM_MAX_ERR_MYD09GA 0.005 
 #define GEO_TO_MEM_MAX_ERR_L3SMI 0.2 
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 #define SORT_SCORE_DLAT 1e-4
@@ -77,12 +77,16 @@ static size_t minMaxURLData(void *data, size_t size, size_t nmemb, void* stream)
 
 int inBounds(const char* url, GeoCoord min, GeoCoord max);
 
+// the length of g, as if it were an ordinary 2-vector (i.e., sqrt(x^2 + y^2))
 float geoLen(const GeoCoord* const g);
 
+// abs value of distance between g1 & g2 (no projection applied)
 float geoDist(const GeoCoord* const g1, const GeoCoord* const g2);
 
+// dot product, as if g1 and g2 were ordinary 2-vectors
 float geoDot(const GeoCoord* const g1, const GeoCoord* const g2);
 
+// component-wise subtraction of lhs - rhs
 GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs);
 
 size_t* memData(MemCoord* m);

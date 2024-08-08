@@ -167,7 +167,8 @@ def downloadForRainDaysPlusN(n):
                 if di not in downloaded:
                     downloaded.append(di)
                     # downloadMYD09GAForDay(di.year, di.month, di.day)
-                    downloadLAADSForDay(di.year, di.month, di.day, MYD09APIURL, "MYD09/", "Latitude", "Longitude", "_1km_Surface_Reflectance_Band_12");
+                    # downloadLAADSForDay(di.year, di.month, di.day, MYD09APIURL, "MYD09/", "Latitude", "Longitude", "_1km_Surface_Reflectance_Band_12");
+                    downloadATML2ForDay(di.year, di.month, di.day)
 
 
 # downloadForRainDays()

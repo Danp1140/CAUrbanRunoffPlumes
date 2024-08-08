@@ -395,6 +395,7 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
 		*/
 
+		/*
 		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
 		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
 		guess.x += inc > 0 ? ceil(inc) : floor(inc);
@@ -408,11 +409,53 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 			guess = (MemCoord){-1u, -1u};
 			break;
 		}
+		*/
+
+		// TODO: declare ALL of these outside the loop
+		// and use totarget in while check
+		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
+		float totarget = geoLen(&adjustedtarget);
+		if (totarget < f->maxgeotomemerr) break;
+		float incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) / totarget * 10.;
+		float incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) / totarget * 10.;
+		// printf("incx: %f\n", incx);
+		guess.x += incx > 0 ? ceil(incx) : floor(incx);
+		if (guess.x < 0 || guess.x >= f->bounds.x) {
+			guess = (MemCoord){-1u, -1u};
+			break;
+		}
+		// printf("incy: %f\n", incy);
+		guess.y += incy > 0 ? ceil(incy) : floor(incy);
+		if (guess.y < 0 || guess.y >= f->bounds.y) {
+			guess = (MemCoord){-1u, -1u};
+			break;
+		}
+		// for some reason, isolating directions ruins everything
+		/*
+		if (incx > incy) {
+			printf("incx: %f\n", incx);
+			guess.x += incx > 0 ? ceil(incx) : floor(incx);
+			if (guess.x < 0 || guess.x >= f->bounds.x) {
+				guess = (MemCoord){-1u, -1u};
+				break;
+			}
+		}
+		else {
+			printf("incy: %f\n", incy);
+			guess.y += incy > 0 ? ceil(incy) : floor(incy);
+			if (guess.y < 0 || guess.y >= f->bounds.y) {
+				guess = (MemCoord){-1u, -1u};
+				break;
+			}
+		}
+		*/
+
 		if (counter++ > GEO_TO_MEM_OPOUT) {
-			// printf("geoToMem out of ops (err = %f)\n", geoDist(&g, &currentGeo));
+			printf("geoToMem out of ops (err = %f)\n", geoDist(&g, &currentGeo));
 			break;
 		}
 	} while (geoDist(&g, &currentGeo) > f->maxgeotomemerr);
+	// printf("took %zu ops\n", counter);
 	return guess;
 }
 

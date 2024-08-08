@@ -125,6 +125,7 @@ int main(int argc, char** argv) {
 			char* msg;
 			asprintf(&msg, "MYD09GA LA plume mask %zu pixels large", n);
 			printBox(msg);
+			free(msg);
 		}
 		else {
 			printf("MYD09GA LA plume mask empty\n");
@@ -431,10 +432,15 @@ MemCoord* calcCutoffRaster(
 	result = realloc(result, sizeof(MemCoord) * *numpixels);
 	
 	// troubleshooting filewrite, should not write every analysis file i dont think
-	char* template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/test%06d.nc4";
-	char filepath[strlen(template) + 2];
-	sprintf(&filepath[0], template, file->fileid);
+	size_t len;
+	nc_inq_path(file->fileid, &len, NULL);
+	char path[len];
+	nc_inq_path(file->fileid, NULL, path);
+	char* template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/2004/test%s.nc4";
+	char* filepath;
+	asprintf(&filepath, template, strrchr(path, '/') + 1);
 	writePlumeRaster(result, *numpixels, origin, extent, &filepath[0], file);
+	free(filepath);
 
 	return result;
 }
@@ -495,8 +501,9 @@ void writePlumeRaster(
 
 void printBox(const char* m) {
 	size_t mlen = strlen(m);
-	char hline[4 + mlen];
+	char hline[5 + mlen];
 	memset(&hline[0], '-', 4 + mlen);
+	hline[4 + mlen] = '\0';
 	printf("%s\n", hline);
 	printf("| %s |\n", m);
 	printf("%s\n", hline);
