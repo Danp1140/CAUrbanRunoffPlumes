@@ -1,35 +1,60 @@
 #include "NCHelpers.h"
 
-const float GEO_HASH_A = GEO_HASH_LAT_MAX * GEO_HASH_SIZE / 2.0 / GEO_HASH_LAT_EXT + GEO_HASH_LON_MAX * GEO_HASH_SIZE / 2.0 / GEO_HASH_LON_EXT;
-const float GEO_HASH_B = GEO_HASH_SIZE / 2.0 / GEO_HASH_LAT_EXT;
-const float GEO_HASH_C = GEO_HASH_SIZE / 2.0 / GEO_HASH_LON_EXT;
-
-
-void initBakedFile(BakedGeoLocNCFile* f) {
-	f->pairs = (MemGeoPair*)malloc((size_t)GEO_HASH_SIZE * sizeof(MemGeoPair));
-	memset(f->pairs, 0, (size_t)GEO_HASH_SIZE * sizeof(MemGeoPair));
+float sortScore(const GeoCoord* g) {
+	// naive approach, unsure if this works
+	if (g->lat > 35.0 || g->lat < 32.0
+		|| g->lon > -116.0 || g->lon < -121.0) return 0.0;
+	return (g->lat - 32.0) + 3.0 * floor((-g->lon - 116.0) * SORT_SCORE_DLAT);
 }
 
-size_t hash(const GeoCoord* g) {
-	// this would need two float to size_t casts anyway for each g coord
-	return (size_t)(GEO_HASH_A - g->lat * GEO_HASH_B + g->lon * GEO_HASH_C);
+void initBakedFile(BakedGeoLocNCFile* f, size_t n) {
+	f->pairs = (MemGeoPair*)malloc(n * sizeof(MemGeoPair));
+	f->numpairs = 0;
+	f->pairssize = n;
+}
+
+void shrinkBakedFile(BakedGeoLocNCFile* f) {
+	f->pairs = (MemGeoPair*)realloc(f->pairs, f->numpairs * sizeof(MemGeoPair));
+	f->pairssize = f->numpairs;
 }
 
 void push(BakedGeoLocNCFile* f, MemGeoPair p) {
-	size_t h = hash(&p.g);
-	while (f->pairs[h].g.lat != 0) { // zeroed out coords implies empty cell
-		if (h == 0) h = (size_t)GEO_HASH_SIZE;
-		h--;
+	float s = sortScore(&p.g);
+	if (s == 0.0) return; // invalid sort score
+	if (f->numpairs == f->pairssize) f->pairs = realloc(f->pairs, f->pairssize++);
+	if (f->numpairs == 0) {
+		f->pairs[0] = p;
+		f->numpairs++;
+		return;
 	}
-	f->pairs[h] = p;
+	MemGeoPair* dst = find(f->pairs, f->numpairs, p.g);
+	
+	if (sortScore(&dst->g) > s) {
+		// move everything up including nearest/dst
+		memmove(dst + 1, dst, sizeof(MemGeoPair) * f->numpairs - (dst - f->pairs));
+	}
+	else { // p not going to have duplicates, unless our scoring system is messed up
+	       // move everything up not including nearest/dst
+		memmove(dst + 2, dst + 1, sizeof(MemGeoPair) * f->numpairs - (dst + 1 - f->pairs)); 
+		dst++;
+	}
+	*dst = p;
+	f->numpairs++;
 }
 
-MemCoord find(const BakedGeoLocNCFile* f, const GeoCoord g) {
-	size_t h = hash(&g);
-	while (f->pairs[h].g.lat != g.lat || f->pairs[h].g.lon != g.lon) {
-		h--;
+MemGeoPair* find(MemGeoPair* p, size_t np, GeoCoord g) {
+	if (np == 1) return p;
+	float s = sortScore(&g);
+	if (np == 2) {
+		return s - sortScore(&p[0].g) < s - sortScore(&p[1].g) ? &p[0] : &p[1];
 	}
-	return f->pairs[h].m;
+	size_t mid = np / 2;
+	if (s > sortScore(&p[mid].g)) return find(&p[mid], np - mid, g);
+	else return find(&p[0], mid, g);
+}
+
+MemCoord search(const BakedGeoLocNCFile* f, const GeoCoord g) {
+	return (MemCoord) {0, 0};
 }
 
 void printInfo(int id, int printattribs) {
@@ -306,7 +331,7 @@ MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int l
 		guess.x += inc > 0 ? ceil(inc) : floor(inc);
 		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
 		guess.y += inc > 0 ? ceil(inc) : floor(inc);
-	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
+	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR_L3SMI);
 	return guess;
 }
 
@@ -342,8 +367,9 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 		printf("unknown lat/lon dimension format in geoToMem!!\n");
 	}
 
-	MemCoord guess = {bounds.y / 2, bounds.x / 2};
+	MemCoord guess = {f->bounds.y / 2, f->bounds.x / 2};
 	GeoCoord currentGeo, dgdmx, dgdmy;
+	size_t counter = 0;
 	do {
 		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &currentGeo.lat);
 		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &currentGeo.lon);
@@ -372,17 +398,21 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
 		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
 		guess.x += inc > 0 ? ceil(inc) : floor(inc);
-		if (guess.x < 0 || guess.x > f->bounds.x) {
+		if (guess.x < 0 || guess.x >= f->bounds.x) {
 			guess = (MemCoord){-1u, -1u};
 			break;
 		}
 		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
 		guess.y += inc > 0 ? ceil(inc) : floor(inc);
-		if (guess.y < 0 || guess.y > f->bounds.y) {
+		if (guess.y < 0 || guess.y >= f->bounds.y) {
 			guess = (MemCoord){-1u, -1u};
 			break;
 		}
-	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
+		if (counter++ > GEO_TO_MEM_OPOUT) {
+			// printf("geoToMem out of ops (err = %f)\n", geoDist(&g, &currentGeo));
+			break;
+		}
+	} while (geoDist(&g, &currentGeo) > f->maxgeotomemerr);
 	return guess;
 }
 
@@ -433,7 +463,7 @@ MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar) {
 		guess[1] += inc;
 		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
 		guess[0] += inc;
-	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR);
+	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR_L3SMI);
 	return (MemCoord){guess[0], guess[1]};
 }
 

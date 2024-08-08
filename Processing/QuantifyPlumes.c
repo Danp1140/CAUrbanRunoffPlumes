@@ -64,11 +64,18 @@ void writePlumeRaster(
 	const char* filepath,
 	const GeoLocNCFile *const src); 
 
+void printBox(const char* m);
+
 int main(int argc, char** argv) {
 	if (argc != 4) {
 		printf("Wrong number of arguments (%d)\nCorrect usage: ./QuantifyPlumes <year> <month> <day>\n", argc);
 		return 0;
 	}
+
+	uint16_t year = atoi(argv[1]);
+	uint8_t month = atoi(argv[2]),
+		day = atoi(argv[3]);
+	printf("––– QuantifyPlumes %d/%d/%d –––\n", month, day, year);
 
 	const GeoCoord lariver = {33.755, -118.185},
 			sgriver = {33.74, -118.115},
@@ -76,6 +83,7 @@ int main(int argc, char** argv) {
 			bcreek = {33.96, -118.46};
 
 	uint8_t numatml2files, numl3smifiles, nummyd09gafiles;
+	printf("Input filepaths:\n");
 	int* l3smifiles = openNCFile(
 			L3SMI_FILEPATH_PREFIX, 
 			atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), 
@@ -89,31 +97,38 @@ int main(int argc, char** argv) {
 			atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), 
 			&numatml2files);
 
-
 	GeoLocNCFile gll3smifiles[numl3smifiles];
 	for (uint8_t i = 0; i < numl3smifiles; i++) {
-		printInfo(l3smifiles[i], 0);
 		gll3smifiles[i] = (GeoLocNCFile){l3smifiles[i], l3smifiles[i], L3SMI_LAT_ID, L3SMI_LON_ID};
 	}
 	GeoLocNCFile glmyd09gafiles[nummyd09gafiles];
 	initGLFiles(&glmyd09gafiles[0], &myd09gafiles[0], nummyd09gafiles, MYD09GA);
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
-		printInfo(myd09gafiles[i], 0);
 	}
 	GeoLocNCFile glatml2files[numatml2files];
 	initGLFiles(&glatml2files[0], &atml2files[0], numatml2files, MYDATML2);
 
-	BakedGeoLocNCFile cloudmaps[1];
-	initCloudMaps(&cloudmaps[0], &glatml2files[0], 1);
+	/*
+	BakedGeoLocNCFile cloudmaps[numatml2files];
+	initCloudMaps(&cloudmaps[0], &glatml2files[0], numatml2files);
+	*/
 
-	printInfo(atml2files[0], 0);
+	// printInfo(atml2files[0], 0);
 
 
 	size_t n;
+	short cutoff = 5000;
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
-		short cutoff = 5000;
+		printf("LA plume cutoff for MYD09GA file %d\n", i);
 		MemCoord* larivercr = calcCutoffRaster(&glmyd09gafiles[i], &glatml2files[0], numatml2files, (void*)(&cutoff), &lariver, STUDY_AREA_RADIUS, &n);
-		printf("plume mask %zu pixels large\n", n);
+		if (n > 0) {
+			char* msg;
+			asprintf(&msg, "MYD09GA LA plume mask %zu pixels large", n);
+			printBox(msg);
+		}
+		else {
+			printf("MYD09GA LA plume mask empty\n");
+		}
 		if (larivercr) free(larivercr);
 	}
 
@@ -150,6 +165,7 @@ int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, u
 	}
 	FTSENT* file;
 	char** filepaths = (char**)malloc(1 * sizeof(char*));
+	*numfiles = 0;
 	while ((file = fts_read(dir))) {
 		if (file->fts_errno != 0) {
 			if (file->fts_errno == 2) {
@@ -163,6 +179,7 @@ int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, u
 			}
 			filepaths[*numfiles] = (char*)malloc(strlen(file->fts_accpath));
 			strcpy(filepaths[*numfiles], file->fts_accpath);
+			printf("[%d]: %s\n", *numfiles, file->fts_name);
 			(*numfiles)++;
 		}
 	}
@@ -171,7 +188,6 @@ int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, u
 	int result;
 	int* ids = (int*)malloc(*numfiles * sizeof(int));
 	for (uint8_t i = 0; i < *numfiles; i++) {
-		printf("%s\n", filepaths[i]);
 		result = nc_open(filepaths[i], NC_NOWRITE, &ids[i]);
 		if (result != NC_NOERR) {
 			if (result == 2) printf("No such file (%s)\n", filepaths[i]);
@@ -188,35 +204,46 @@ void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet 
 	for (uint8_t i = 0; i < numfiles; i++) {
 		switch (d) {
 			case MYDATML2:
-				dst[i] = (GeoLocNCFile){files[i], files[i], MYDATML2_LAT_ID, MYDATML2_LON_ID, MYDATML2_CLOUDMASK_ID, 1000, {0, 0}};
+				dst[i] = (GeoLocNCFile){files[i], files[i], MYDATML2_LAT_ID, MYDATML2_LON_ID, MYDATML2_CLOUDMASK_ID, 1000, GEO_TO_MEM_MAX_ERR_ATML2, {0, 0}};
 				break;
 			case L3SMI:
-				dst[i] = (GeoLocNCFile){files[i], files[i], L3SMI_LAT_ID, L3SMI_LON_ID, 2, 4638, {0, 0}};
+				dst[i] = (GeoLocNCFile){files[i], files[i], L3SMI_LAT_ID, L3SMI_LON_ID, 2, 4638, GEO_TO_MEM_MAX_ERR_L3SMI, {0, 0}};
 				break;
 			case MYD09GA:
-				dst[i] = (GeoLocNCFile){files[i], files[i], MYD09GA_LAT_ID, MYD09GA_LON_ID, MYD09GA_RRS_ID, 500, {0, 0}};
+				dst[i] = (GeoLocNCFile){files[i], files[i], MYD09GA_LAT_ID, MYD09GA_LON_ID, MYD09GA_RRS_ID, 500, GEO_TO_MEM_MAX_ERR_MYD09GA, {0, 0}};
 				break;
 		}
 		int dimids[2];
 		nc_inq_vardimid(dst[i].fileid, dst[i].latvarid, &dimids[0]); // presuming lat & lon both have 2 dimensions and they're the same
 									     // if we need to run this on L3SMI, gonna need to do some checking
-		nc_inq_dimlen(dst[i].fileid, dimids[0], &dst[i].bounds.x);
-		nc_inq_dimlen(dst[i].fileid, dimids[1], &dst[i].bounds.y);
+		nc_inq_dimlen(dst[i].fileid, dimids[0], &dst[i].bounds.y);
+		nc_inq_dimlen(dst[i].fileid, dimids[1], &dst[i].bounds.x);
 	}
 }
 
 void initCloudMaps(BakedGeoLocNCFile* dst, GeoLocNCFile* files, const uint8_t numfiles) {
 	MemCoord m;
-	GeoCoord g;
+	GeoCoord g, g2;
+	float s;
 	for (uint8_t i = 0; i < numfiles; i++) {
-		initBakedFile(&dst[i]);
+		initBakedFile(&dst[i], files[i].bounds.x * files[i].bounds.y);
 		for (m.y = 0; m.y < files[i].bounds.y; m.y++) {
 			for (m.x = 0; m.x < files[i].bounds.x; m.x++) {
 				g = memToGeo(m, &files[i]);
-				printf("hash: %zu\n", hash(&g));
+				s = sortScore(&g);
+				push(&dst[i], (MemGeoPair){m, g});
+				if (s != 0.0) {
+					g2 = find(dst[i].pairs, dst[i].numpairs, g)->g;
+					if (g.lat != g2.lat || g.lon != g2.lon) printf("\033[101;97m");
+					printf("{%f, %f} transformed to {%f, %f}", g.lat, g.lon, g2.lat, g2.lon);
+					if (g.lat != g2.lat || g.lon != g2.lon) printf("\033[0m");
+					printf("\n");
+				}
 			}
 		}
+		shrinkBakedFile(&dst[i]);
 	}
+	printf("done\n");
 }
 
 MemCoord* calcCutoffRaster(
@@ -244,6 +271,8 @@ MemCoord* calcCutoffRaster(
 
 	GeoCoord lowerbound = memToGeo((MemCoord){0, 0}, file), 
 		 upperbound = memToGeo((MemCoord){file->bounds.y - 1, file->bounds.x - 1}, file);
+	// trying a pixel radius instead of degrees
+
 	if (lowerbound.lat > upperbound.lat) {
 		float temp = lowerbound.lat;
 		lowerbound.lat = upperbound.lat;
@@ -267,12 +296,29 @@ MemCoord* calcCutoffRaster(
 		return NULL;
 	}
 
+	/*
 	MemCoord extent = geoToMem(lowerright, file);
 	MemCoord origin = geoToMem(upperleft, file);
+	*/
+	// trying pixelrad
+	// in the future should scale relative to resolution
+	const size_t pixelrad = 50;
+	MemCoord memcenter = geoToMem(*center, file);
+	if (memcenter.x == -1u || memcenter.y == -1u) {
+		// printf("center outside of image\n");
+		return NULL;
+	}
+	MemCoord extent = {memcenter.y + pixelrad, memcenter.x + pixelrad};
+	MemCoord origin = {memcenter.y - pixelrad, memcenter.x - pixelrad};
+	if (extent.x > file->bounds.x) extent.x = file->bounds.x - 1;
+	if (extent.y > file->bounds.y) extent.y = file->bounds.y - 1;
+	if (origin.x < 0) origin.x = 0; 
+	if (origin.y < 0) origin.y = 0; 
+
 	if (extent.x == -1u || origin.y == -1u) { // out-of-range extent or origin
 						  // technically this doesn't make full use of our data, we can
 						  // come back to this later, instead locking to min/max
-		printf("study radius completely outside satellite image\n");
+		// printf("study radius completely outside satellite image\n");
 		return NULL;
 	}
 
@@ -290,7 +336,6 @@ MemCoord* calcCutoffRaster(
 		origin.y = temp;
 	}
 	size_t maxarea = (extent.x - origin.x) * (extent.y - origin.y);
-	printf("max area %zu\n", maxarea);
 	MemCoord* result = (MemCoord*)malloc(sizeof(MemCoord) * maxarea);
 
 	GeoCoord gtemp;
@@ -304,37 +349,46 @@ MemCoord* calcCutoffRaster(
 	int clear;
 	struct CloudMemCoord {size_t byte; MemCoord m;} cloudmcoord;
 	cloudmcoord.byte = 0;
+	size_t totalinradius = 0,
+	       occludedbycloud = 0,
+	       belowcutoff = 0,
+	       rasterized = 0;
+	// printf("o: {%zu, %zu}, e: {%zu, %zu}\n", origin.x, origin.y, extent.x, extent.y);
 	for (current.y = origin.y; current.y < extent.y; current.y++) {
 		for (current.x = origin.x; current.x < extent.x; current.x++) {
-			clear = 0;
-			for (cloudcounter = 0; cloudcounter < numcloudfiles; cloudcounter++) {
-				gtemp = memToGeo(current, file);
-				// cloudmcoord.m = geoToMem(gtemp, &clouds[cloudcounter]);
-				cloudmcoord.m = (MemCoord){0, 0}; 
-				if (cloudmcoord.m.x == -1u || cloudmcoord.m.y == -1u) {
+			gtemp = memToGeo(current, file);
+			// if (geoDist(&gtemp, center) < radius) {
+			if (sqrt(pow(current.x - memcenter.x, 2) + pow(current.y - memcenter.y, 2)) < pixelrad) {
+				totalinradius++;
+				clear = 0;
+				for (cloudcounter = 0; cloudcounter < numcloudfiles; cloudcounter++) {
+					gtemp = memToGeo(current, file);
+					cloudmcoord.m = geoToMem(gtemp, &clouds[cloudcounter]);
+					// cloudmcoord.m = (MemCoord){0, 0}; 
+					if (cloudmcoord.m.x == -1u || cloudmcoord.m.y == -1u) {
+						continue;
+					}
+					// TODO: Cloud_Mask is actually an NC_INT for some reason
+					nc_get_var1_ubyte(clouds[cloudcounter].fileid, clouds[cloudcounter].keyvarid, &cloudmcoord.byte, &cloudbyte);
+					/*
+					printf("%zu: %c%c%c\n", cloudcounter,
+							cloudbyte & 0b0100 ? '1' : '0',
+							cloudbyte & 0b0010 ? '1' : '0',
+							cloudbyte & 0b0001 ? '1' : '0');
+							*/
+					// TODO: replace with bitmask macros
+					// second check is true if probably, or certainly clear, but not if cloudy or uncertain
+					// uncertain is actually pretty common 
+					if (cloudbyte & 0b00000001 && cloudbyte & 0b00000100) {
+						clear = 1;
+					}
+					else clear = 0;
+				}
+				if (clear == 0) {
+					occludedbycloud++;
+					// printf("pixel obstructed by cloud\n");
 					continue;
 				}
-				nc_get_var1_ubyte(clouds[cloudcounter].fileid, clouds[cloudcounter].keyvarid, &cloudmcoord.byte, &cloudbyte);
-				/*
-				printf("%zu: %c%c%c\n", cloudcounter,
-						cloudbyte & 0b0100 ? '1' : '0',
-						cloudbyte & 0b0010 ? '1' : '0',
-						cloudbyte & 0b0001 ? '1' : '0');
-						*/
-				// TODO: replace with bitmask macros
-				// second check is true if probably, or certainly clear, but not if cloudy or uncertain
-				// uncertain is actually pretty common 
-				if (cloudbyte & 0b00000001 && cloudbyte & 0b00000100) {
-					clear = 1;
-				}
-				else clear = 0;
-			}
-			if (clear == 0) {
-				// printf("pixel obstructed by cloud\n");
-				continue;
-			}
-			gtemp = memToGeo(current, file);
-			if (geoDist(&gtemp, center) < radius) {
 				store = 0;
 				if (type == NC_FLOAT) {
 					nc_get_var1_float(file->fileid, file->keyvarid, memData(&current), (float*)(&datatemp[0]));
@@ -357,16 +411,25 @@ MemCoord* calcCutoffRaster(
 						printf("numpixels %zu larger than areasize %zu\n", *numpixels, maxarea);
 						return result;
 					}
+					rasterized++;
 				}
+				else belowcutoff++;
 			}
 		}
 	}
+
+	printf("Stats:\n\tPixels in radius: %zu\n\t%% rasterized: %f\n\t%% occluded by clouds: %f\n\t%% below cutoff: %f\n", 
+			totalinradius, 
+			(float)rasterized / (float)totalinradius,
+			(float)occludedbycloud / (float)totalinradius,
+			(float)belowcutoff / (float)totalinradius);
+
 	if (*numpixels == 0) {
 		free(result);
 		return NULL;
 	}
 	result = realloc(result, sizeof(MemCoord) * *numpixels);
-
+	
 	// troubleshooting filewrite, should not write every analysis file i dont think
 	char* template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/test%06d.nc4";
 	char filepath[strlen(template) + 2];
@@ -430,3 +493,11 @@ void writePlumeRaster(
 	nc_close(result.fileid);
 }
 
+void printBox(const char* m) {
+	size_t mlen = strlen(m);
+	char hline[4 + mlen];
+	memset(&hline[0], '-', 4 + mlen);
+	printf("%s\n", hline);
+	printf("| %s |\n", m);
+	printf("%s\n", hline);
+}
