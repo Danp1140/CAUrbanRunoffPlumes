@@ -370,6 +370,7 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 	MemCoord guess = {f->bounds.y / 2, f->bounds.x / 2};
 	GeoCoord currentGeo, dgdmx, dgdmy;
 	size_t counter = 0;
+	float incx, incy, totarget;
 	do {
 		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &currentGeo.lat);
 		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &currentGeo.lon);
@@ -414,10 +415,31 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 		// TODO: declare ALL of these outside the loop
 		// and use totarget in while check
 		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
-		float totarget = geoLen(&adjustedtarget);
+		totarget = geoLen(&adjustedtarget);
 		if (totarget < f->maxgeotomemerr) break;
+		// below is what got us exact results when onscreen (after ~750 ops)
+		/*
 		float incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) / totarget * 10.;
 		float incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) / totarget * 10.;
+		*/
+		/*
+		 * One more idea is to scale incx and incy so that they're greater than 1,
+		 * but keep their proportional difference (i.e. 0.004, 0.001 => 4, 1)
+		 */
+		incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) * totarget * 100;
+		incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) * totarget * 100;
+		if (fabsf(incx) < 1 && fabsf(incy) < 1) {
+			if (fabsf(incx) > fabsf(incy)) {
+				// incy = 0;
+				incx /= fabsf(incy);
+				incy = 1;
+			}
+			else {
+				//incx = 0;
+				incy /= fabsf(incx);
+				incx = 1;
+			}
+		}
 		// printf("incx: %f\n", incx);
 		guess.x += incx > 0 ? ceil(incx) : floor(incx);
 		if (guess.x < 0 || guess.x >= f->bounds.x) {
@@ -430,28 +452,9 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 			guess = (MemCoord){-1u, -1u};
 			break;
 		}
-		// for some reason, isolating directions ruins everything
-		/*
-		if (incx > incy) {
-			printf("incx: %f\n", incx);
-			guess.x += incx > 0 ? ceil(incx) : floor(incx);
-			if (guess.x < 0 || guess.x >= f->bounds.x) {
-				guess = (MemCoord){-1u, -1u};
-				break;
-			}
-		}
-		else {
-			printf("incy: %f\n", incy);
-			guess.y += incy > 0 ? ceil(incy) : floor(incy);
-			if (guess.y < 0 || guess.y >= f->bounds.y) {
-				guess = (MemCoord){-1u, -1u};
-				break;
-			}
-		}
-		*/
 
 		if (counter++ > GEO_TO_MEM_OPOUT) {
-			printf("geoToMem out of ops (err = %f)\n", geoDist(&g, &currentGeo));
+			// printf("geoToMem out of ops (err = %f)\n", geoDist(&g, &currentGeo));
 			break;
 		}
 	} while (geoDist(&g, &currentGeo) > f->maxgeotomemerr);

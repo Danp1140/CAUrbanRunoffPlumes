@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
 
 
 	size_t n;
-	short cutoff = 5000;
+	short cutoff = 3000;
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
 		printf("LA plume cutoff for MYD09GA file %d\n", i);
 		MemCoord* larivercr = calcCutoffRaster(&glmyd09gafiles[i], &glatml2files[0], numatml2files, (void*)(&cutoff), &lariver, STUDY_AREA_RADIUS, &n);
@@ -303,7 +303,7 @@ MemCoord* calcCutoffRaster(
 	*/
 	// trying pixelrad
 	// in the future should scale relative to resolution
-	const size_t pixelrad = 50;
+	const size_t pixelrad = 25;
 	MemCoord memcenter = geoToMem(*center, file);
 	if (memcenter.x == -1u || memcenter.y == -1u) {
 		// printf("center outside of image\n");
@@ -347,12 +347,13 @@ MemCoord* calcCutoffRaster(
 	char datatemp[4]; // facilitates moving up to 32 bytes of data
 	unsigned char cloudbyte;
 	size_t cloudcounter;
-	int clear;
+	int clear, water;
 	struct CloudMemCoord {size_t byte; MemCoord m;} cloudmcoord;
 	cloudmcoord.byte = 0;
 	size_t totalinradius = 0,
 	       occludedbycloud = 0,
 	       belowcutoff = 0,
+	       notwater = 0,
 	       rasterized = 0;
 	// printf("o: {%zu, %zu}, e: {%zu, %zu}\n", origin.x, origin.y, extent.x, extent.y);
 	for (current.y = origin.y; current.y < extent.y; current.y++) {
@@ -362,21 +363,24 @@ MemCoord* calcCutoffRaster(
 			if (sqrt(pow(current.x - memcenter.x, 2) + pow(current.y - memcenter.y, 2)) < pixelrad) {
 				totalinradius++;
 				clear = 0;
+				// water = 1;
 				for (cloudcounter = 0; cloudcounter < numcloudfiles; cloudcounter++) {
 					gtemp = memToGeo(current, file);
 					cloudmcoord.m = geoToMem(gtemp, &clouds[cloudcounter]);
-					// cloudmcoord.m = (MemCoord){0, 0}; 
 					if (cloudmcoord.m.x == -1u || cloudmcoord.m.y == -1u) {
 						continue;
 					}
 					// TODO: Cloud_Mask is actually an NC_INT for some reason
 					nc_get_var1_ubyte(clouds[cloudcounter].fileid, clouds[cloudcounter].keyvarid, &cloudmcoord.byte, &cloudbyte);
+					// skip if land, desert, or coastal
+					// could allow coastal by, as some water pixels may be included
+					// land mask is actually too low-resolution to be usable this close to the coast
 					/*
-					printf("%zu: %c%c%c\n", cloudcounter,
-							cloudbyte & 0b0100 ? '1' : '0',
-							cloudbyte & 0b0010 ? '1' : '0',
-							cloudbyte & 0b0001 ? '1' : '0');
-							*/
+					if (cloudbyte & 0b10000000 || cloudbyte & 0b01000000) {
+						water = 0;
+						break;
+					}
+					*/
 					// TODO: replace with bitmask macros
 					// second check is true if probably, or certainly clear, but not if cloudy or uncertain
 					// uncertain is actually pretty common 
@@ -385,6 +389,12 @@ MemCoord* calcCutoffRaster(
 					}
 					else clear = 0;
 				}
+				/*
+				if (water == 0) {
+					notwater++;
+					continue;
+				}
+				*/
 				if (clear == 0) {
 					occludedbycloud++;
 					// printf("pixel obstructed by cloud\n");
@@ -436,7 +446,7 @@ MemCoord* calcCutoffRaster(
 	nc_inq_path(file->fileid, &len, NULL);
 	char path[len];
 	nc_inq_path(file->fileid, NULL, path);
-	char* template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/2004/test%s.nc4";
+	char* template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/2004/%s";
 	char* filepath;
 	asprintf(&filepath, template, strrchr(path, '/') + 1);
 	writePlumeRaster(result, *numpixels, origin, extent, &filepath[0], file);
