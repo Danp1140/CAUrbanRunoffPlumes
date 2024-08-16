@@ -8,7 +8,7 @@ sariver = (33.63, -117.96)
 bcreek = (33.96, -118.46)
 
 SQUARE_WIDTH = 0.2 # in degrees
-RESIDUAL_DAYS = 5 # download this many extra days after rainy day
+RESIDUAL_DAYS = 30 # download this many extra days after rainy day
 # RESIDUAL_DAYS extra long in case we dont have super recent Sentinel coverage
 
 # gives a generous spatial extent for load_collection based on SQUARE_WIDTH
@@ -33,7 +33,9 @@ def getDataCube(connection, name, bands, year, month, day, site):
     if name == "SENTINEL1_GRD":
         print("sentinel1")
         cube = cube.sar_backscatter(coefficient='sigma0-ellipsoid')
-    cube.filter_bbox(bbox=generateSpatialExt(site))
+    cube = cube.filter_bbox(bbox=generateSpatialExt(site))
+    cube = cube.resample_spatial(resolution=0, projection=3426)
+    # cube = openeo.processes.vector_reproject(cube, projection=3426)
     print(name)
     print(generateSpatialExt(site))
     print(generateTemporalExt(year, month, day))
@@ -65,12 +67,14 @@ print(dc)
 
 # coastal ultrablue, near IR, & highest wavelength IR
 # dc = getDataCube(con, "SENTINEL2_L2A", ["B01", "B08", "B12"], 2020, 1, 1, lariver)
-dc = getDataCube(con, "SENTINEL1_GRD", ["VV", "VH"], 2020, 1, 1, lariver)
+dc = getDataCube(con, "SENTINEL1_GRD", ["VV", "VH"], 2016, 1, 1, lariver)
 
 result = dc.save_result(format='netCDF')
 
-job = result.create_job()
+# job = result.create_job()
 
-job.start_and_wait()
+# job.start_and_wait()
+
+job = result.execute_batch()
 
 job.get_results().download_files("test")

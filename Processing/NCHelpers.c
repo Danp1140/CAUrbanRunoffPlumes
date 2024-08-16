@@ -396,46 +396,18 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
 		*/
 
-		/*
-		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
-		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
-		guess.x += inc > 0 ? ceil(inc) : floor(inc);
-		if (guess.x < 0 || guess.x >= f->bounds.x) {
-			guess = (MemCoord){-1u, -1u};
-			break;
-		}
-		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
-		guess.y += inc > 0 ? ceil(inc) : floor(inc);
-		if (guess.y < 0 || guess.y >= f->bounds.y) {
-			guess = (MemCoord){-1u, -1u};
-			break;
-		}
-		*/
-
-		// TODO: declare ALL of these outside the loop
 		// and use totarget in while check
 		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
 		totarget = geoLen(&adjustedtarget);
 		if (totarget < f->maxgeotomemerr) break;
-		// below is what got us exact results when onscreen (after ~750 ops)
-		/*
-		float incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) / totarget * 10.;
-		float incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) / totarget * 10.;
-		*/
-		/*
-		 * One more idea is to scale incx and incy so that they're greater than 1,
-		 * but keep their proportional difference (i.e. 0.004, 0.001 => 4, 1)
-		 */
 		incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) * totarget * 100;
 		incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) * totarget * 100;
 		if (fabsf(incx) < 1 && fabsf(incy) < 1) {
 			if (fabsf(incx) > fabsf(incy)) {
-				// incy = 0;
 				incx /= fabsf(incy);
 				incy = 1;
 			}
 			else {
-				//incx = 0;
 				incy /= fabsf(incx);
 				incx = 1;
 			}

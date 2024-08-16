@@ -28,6 +28,18 @@ def processForRainDaysPlusN(n):
                     subprocess.run(["./QuantifyPlumes", str(di.year), str(di.month), str(di.day)], stdout=log)
     log.close()
 
+subprocess.run(["rm", "Data/LARiver.csv"])
+subprocess.run(["rm", "Data/SGRiver.csv"])
+subprocess.run(["rm", "Data/SARiver.csv"])
+subprocess.run(["rm", "Data/BCreek.csv"])
+with open("Data/LARiver.csv", 'w') as f:
+    csv.writer(f).writerow(["Date", "MYD09GA Area (m^2)", "MYD09GA Avg. Intensity (refl/m^2)"])
+with open("Data/SGRiver.csv", 'w') as f:
+    csv.writer(f).writerow(["Date", "MYD09GA Area (m^2)", "MYD09GA Avg. Intensity (refl/m^2)"])
+with open("Data/SARiver.csv", 'w') as f:
+    csv.writer(f).writerow(["Date", "MYD09GA Area (m^2)", "MYD09GA Avg. Intensity (refl/m^2)"])
+with open("Data/BCreek.csv", 'w') as f:
+    csv.writer(f).writerow(["Date", "MYD09GA Area (m^2)", "MYD09GA Avg. Intensity (refl/m^2)"])
 subprocess.run(["rm", "-r", "2004/"])
 subprocess.run(["mkdir", "2004"])
 processForRainDaysPlusN(3)
