@@ -11,6 +11,7 @@
 #define GEO_TO_MEM_MAX_ERR_ATML2 0.2 
 #define GEO_TO_MEM_MAX_ERR_MYD09GA 0.005 
 #define GEO_TO_MEM_MAX_ERR_L3SMI 0.2 
+#define GEO_TO_MEM_MAX_ERR_WATER_MASK 0.0001
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 #define SORT_SCORE_DLAT 1e-4
 #define GEO_TO_MEM_OPOUT 1000 // num loops before we give up ongeoToMem
@@ -33,6 +34,7 @@ typedef struct GeoLocNCFile {
 	uint16_t scale; // m/px
 	float maxgeotomemerr;
 	MemCoord bounds;
+	size_t latoffset, lonoffset; // used for indexing lat/lon data regardless of if they're 2d or 1d
 } GeoLocNCFile;
 
 typedef struct MemGeoPair {

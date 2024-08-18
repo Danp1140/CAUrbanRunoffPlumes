@@ -256,15 +256,16 @@ size_t* memData(MemCoord* m) {return &m->y;}
 
 GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar) {
 	GeoCoord result;
-	// TODO: add way to determine appropriate dims
-	// likely best to store offset/dim data in GeoLoc struct to avoid repeated inq calls
 	nc_get_var1_float(geogroup, latvar, memData(&m), &result.lat);
 	nc_get_var1_float(geogroup, lonvar, memData(&m), &result.lon);
 	return result;
 }
 
 GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f) {
-	return _memToGeo(m, f->geogroupid, f->latvarid, f->lonvarid);
+	GeoCoord result;
+	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&m) + f->latoffset, &result.lat);
+	nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&m) + f->lonoffset, &result.lon);
+	return result;
 }
 
 MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int lonvar) {

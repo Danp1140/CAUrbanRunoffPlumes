@@ -26,6 +26,12 @@
 #define MYD09GA_LON_ID 2
 #define MYD09GA_RRS_ID 0
 
+#define WATER_MASK_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/SatelliteData/WaterMasks/30mTotalAreaMask.nc"
+#define WATER_MASK_GEOGROUP_ID -1
+#define WATER_MASK_LAT_ID 2
+#define WATER_MASK_LON_ID 3
+#define WATER_MASK_WATER_ID 1
+
 #define ATML2_DETERMINED_BIT 0x01
 #define ATML2_UNCERTAIN_BIT 0x04 // note that both cloudy & uncertain have uncertain bit set
 
@@ -40,7 +46,8 @@ typedef struct OutputRow {
 typedef enum DataSet {
 	MYDATML2,
 	L3SMI,
-	MYD09GA
+	MYD09GA,
+	WATER_MASK
 } DataSet;
 
 const GeoCoord lariver = {33.755, -118.185},
@@ -103,7 +110,10 @@ int main(int argc, char** argv) {
 		* atml2files = openNCFile(
 			MYDATML2_FILEPATH_PREFIX,
 			atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), 
-			&numatml2files);
+			&numatml2files),
+		watermaskfile;
+
+	nc_open(WATER_MASK_FILEPATH, NC_NOWRITE, &watermaskfile);
 
 	GeoLocNCFile glmyd09gafiles[nummyd09gafiles];
 	initGLFiles(&glmyd09gafiles[0], &myd09gafiles[0], nummyd09gafiles, MYD09GA);
@@ -111,6 +121,8 @@ int main(int argc, char** argv) {
 	}
 	GeoLocNCFile glatml2files[numatml2files];
 	initGLFiles(&glatml2files[0], &atml2files[0], numatml2files, MYDATML2);
+	GeoLocNCFile glwatermaskfile;
+	initGLFiles(&glwatermaskfile, &watermaskfile, 1, WATER_MASK);
 
 	FILE* lariverout = fopen(OUTPUT_FILEPATH "LARiver.csv", "a");
 
@@ -141,6 +153,8 @@ int main(int argc, char** argv) {
 		nc_close(myd09gafiles[i]);
 	}
 	free(myd09gafiles);
+
+	nc_close(watermaskfile);
 
 	return 0;
 }
@@ -208,12 +222,55 @@ void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet 
 			case MYD09GA:
 				dst[i] = (GeoLocNCFile){files[i], files[i], MYD09GA_LAT_ID, MYD09GA_LON_ID, MYD09GA_RRS_ID, 500, GEO_TO_MEM_MAX_ERR_MYD09GA, {0, 0}};
 				break;
+			case WATER_MASK:
+				dst[i] = (GeoLocNCFile){
+					files[i],
+					files[i],
+					WATER_MASK_LAT_ID,
+					WATER_MASK_LON_ID,
+					WATER_MASK_WATER_ID,
+					30,
+					GEO_TO_MEM_MAX_ERR_WATER_MASK,
+					{0, 0}};
 		}
-		int dimids[2];
-		nc_inq_vardimid(dst[i].fileid, dst[i].latvarid, &dimids[0]); // presuming lat & lon both have 2 dimensions and they're the same
-									     // if we need to run this on L3SMI, gonna need to do some checking
-		nc_inq_dimlen(dst[i].fileid, dimids[0], &dst[i].bounds.y);
-		nc_inq_dimlen(dst[i].fileid, dimids[1], &dst[i].bounds.x);
+		int nlatdims, nlondims;
+		nc_inq_varndims(dst[i].geogroupid, dst[i].latvarid, &nlatdims);
+		nc_inq_varndims(dst[i].geogroupid, dst[i].lonvarid, &nlondims);
+		int latdimids[nlatdims], londimids[nlondims];
+		nc_inq_vardimid(dst[i].geogroupid, dst[i].latvarid, &latdimids[0]);
+		nc_inq_vardimid(dst[i].geogroupid, dst[i].lonvarid, &londimids[0]);
+		if (nlatdims == nlondims) {
+			size_t dimlen;
+			if (nlatdims == 2) {
+				// for some reason y is stored before x
+				// this assumes dims are always stored y-res @ 0, x-res @ 1
+				nc_inq_dimlen(dst[i].geogroupid, latdimids[0], &dimlen);
+				dst[i].bounds.y = dimlen;
+				nc_inq_dimlen(dst[i].geogroupid, latdimids[1], &dimlen);
+				dst[i].bounds.x = dimlen;
+				dst[i].latoffset = 0;
+				dst[i].lonoffset = 0;
+			}
+			// if ndims == 1, we'll assume a L3SMI-style lin indep lat & lon
+			else if (nlatdims == 1) {
+				if (latdimids[0] < londimids[0]) {
+					dst[i].lonoffset = 1;
+					dst[i].latoffset = 0;
+				}
+				else if (londimids[0] < latdimids[0]) {
+					dst[i].latoffset = 1;
+					dst[i].lonoffset = 0;
+				}
+				else printf("lat/lon have same dimension, but only 1\n");
+				nc_inq_dimlen(dst[i].geogroupid, latdimids[0], &dimlen);
+				dst[i].bounds.y = dimlen;
+				nc_inq_dimlen(dst[i].geogroupid, londimids[0], &dimlen);
+				dst[i].bounds.x = dimlen;
+			}
+		}
+		else {
+			printf("unknown lat/lon dimension format in geoToMem!!\n");
+		}
 	}
 }
 
