@@ -112,22 +112,40 @@ def downloadLAADSForDay(year, month, day, apiurl, folderprefix, latname, lonname
         response = urllib.request.urlopen(addDateRangeToAPIURL(apiurl, year, month, day))
     except urllib.error.HTTPError as err:
         logHTTPError(err)   
-        return
+        return -1
     try:
         jsonresp = json.loads(response.read().decode())
     except:
         logError(str(datetime.datetime.now()) + " | JSON didn't work out, probably got an empty response back\nWas working on " + str(year) + "/" + str(month) + "/" + str(day) + "\nFrom decoded response:\n"
                  + response.read().decode() + "\n")
-    for key in jsonresp:
-        try:
-            binresp = urllib.request.urlopen(downloadURLPrefix + jsonresp[key]["fileURL"][9:] + ".nc4?" + latname + "," + lonname + "," + varname)
-        except urllib.error.HTTPError as err:
-            logHTTPError(err)
-            continue
-        filepath = folderprefix + str(year) + "/" + str(month) + "/" + str(day) + "/" + jsonresp[key]["name"] + ".nc4"
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'wb') as output:
-            output.write(binresp.read()) 
+        # not sure why we dont return or continue here
+    with open("../../Processing/useless.txt") as uselessfilelist:
+        for key in jsonresp:
+            useless = False
+            for l in uselessfilelist:
+                # skip newline at end of line and ".nc"
+                if l[:-4] == jsonresp[key]["name"]:
+                    print("file " + l[:-4] + " deemed useless")
+                    useless = True
+                    break
+            if useless:
+                continue
+            # finalurl = downloadURLPrefix + jsonresp[key]["fileURL"][9:] + ".nc4?dap4.ce=/" + latname + ";/" + lonname + ";/" + varname
+            finalurl = downloadURLPrefix + jsonresp[key]["fileURL"][9:] + ".nc4?" + latname + "," + lonname + "," + varname
+            try:
+                binresp = urllib.request.urlopen(finalurl)
+                print("trying " + finalurl)
+            except urllib.error.HTTPError as err:
+                logHTTPError(err)
+                return -1
+            except TimeoutError as err:
+                logError(str(datetime.datetime.now()) + " | Timed out accessing " + finalurl + " (for date " + str(year) + "/" + str(month) + "/" + str(day) + ")\n")
+                return -1
+            filepath = folderprefix + str(year) + "/" + str(month) + "/" + str(day) + "/" + jsonresp[key]["name"] + ".nc4"
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'wb') as output:
+                output.write(binresp.read()) 
+        return 0
 
 
 def downloadForRainDays():
@@ -168,10 +186,39 @@ def downloadForRainDaysPlusN(n):
                     downloaded.append(di)
                     # downloadMYD09GAForDay(di.year, di.month, di.day)
                     # downloadLAADSForDay(di.year, di.month, di.day, MYD09APIURL, "MYD09/", "Latitude", "Longitude", "_1km_Surface_Reflectance_Band_12");
-                    downloadATML2ForDay(di.year, di.month, di.day)
+                    # downloadATML2ForDay(di.year, di.month, di.day)
+
+def execForRainDaysPlusN(n, year, func):
+    downloaded = []
+    failed = []
+    with open("/Users/danp/Desktop/CAUrbanRunoffPlumes/SatelliteData/AquaMODIS/LAXPrcpDataTemp.csv") as csvfile:
+        for row in csv.reader(csvfile):
+            x = re.split("/", row[0])
+            if len(x) < 3:
+                continue
+            if len(x[0]) == 1:
+                x[0] = "0" + x[0]
+            if len(x[1]) == 1:
+                x[1] = "0" + x[1]
+            if len(x[2]) == 2:
+                x[2] = "20" + x[2]
+            d = datetime.datetime(int(x[2]), int(x[0]), int(x[1])) 
+            if (d.year < year):
+                continue
+            if (d.year > year): 
+                break
+            for i in range(0, n):
+                di = d + datetime.timedelta(days=i)
+                if di not in downloaded:
+                    downloaded.append(di)
+                    if (func(di.year, di.month, di.day) == -1):
+                        failed.append(di)
+    for di in failed:
+        logError("retrying failed download for date " + str(di))
+        func(di.year, di.month, di.day)
 
 
 # downloadForRainDays()
 
 # downloadMYD09GAForDay(2004, 1, 1)
-downloadForRainDaysPlusN(3)
+# downloadForRainDaysPlusN(3)

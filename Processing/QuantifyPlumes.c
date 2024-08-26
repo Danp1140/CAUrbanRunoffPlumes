@@ -4,7 +4,7 @@
 #include <sys/stat.h>
 #include <fts.h>
 
-#define STUDY_AREA_RADIUS 12500 // in meters 
+#define STUDY_AREA_RADIUS 10000 // in meters 
 #define CUTOFF_RASTER_BBOX_MARGIN 1000 // in meters
 
 #define DATE_PATH_FORMAT "%u/%u/%u"
@@ -26,16 +26,17 @@
 #define MYD09GA_LON_ID 2
 #define MYD09GA_RRS_ID 0
 
-#define WATER_MASK_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/SatelliteData/WaterMasks/30mTotalAreaMask.nc"
+#define WATER_MASK_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/SatelliteData/WaterMasks/30mLARiverMask.nc"
 #define WATER_MASK_GEOGROUP_ID -1
-#define WATER_MASK_LAT_ID 2
-#define WATER_MASK_LON_ID 3
-#define WATER_MASK_WATER_ID 1
+#define WATER_MASK_LAT_ID 1
+#define WATER_MASK_LON_ID 2
+#define WATER_MASK_WATER_ID 0
 
 #define ATML2_DETERMINED_BIT 0x01
 #define ATML2_UNCERTAIN_BIT 0x04 // note that both cloudy & uncertain have uncertain bit set
 
 #define OUTPUT_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/Data/"
+#define USELESS_FILE_LIST_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/useless.txt"
 
 typedef struct OutputRow {
 	uint16_t year;
@@ -50,10 +51,23 @@ typedef enum DataSet {
 	WATER_MASK
 } DataSet;
 
+typedef struct Site {
+	GeoCoord center;
+	const char* outputfilepath, * longname;
+} Site;
+
 const GeoCoord lariver = {33.755, -118.185},
 			sgriver = {33.74, -118.115},
 			sariver = {33.63, -117.96},
 			bcreek = {33.96, -118.46};
+
+#define NUM_SITES 4
+const Site studysites[NUM_SITES] = {
+	{{33.755, -118.185}, OUTPUT_FILEPATH "LARiver.csv", "Los Angeles River"},
+	{{33.74, -118.115}, OUTPUT_FILEPATH "SGRiver.csv", "San Gabriel River"},
+	{{33.63, -117.96}, OUTPUT_FILEPATH "SARiver.csv", "Santa Ana River"},
+	{{33.96, -118.46}, OUTPUT_FILEPATH "BCreek.csv", "Ballona Creek"}
+};
 
 int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, uint8_t* numfiles);
 
@@ -73,6 +87,7 @@ MemCoord* calcCutoffRaster(
 	const GeoLocNCFile* const file, 
 	const GeoLocNCFile* const clouds, 
 	const size_t numcloudfiles,
+	const GeoLocNCFile* const water,
 	const void* cutoff,  // to allow for different var types. assumed to be the exact size of the type of var @ varid
 	const GeoCoord* const center, 
 	const float radius,
@@ -89,6 +104,8 @@ void writePlumeRaster(
 void printBox(const char* m);
 
 void writeData(FILE* f, const OutputRow* r);
+
+void profileGeoToMem(const GeoLocNCFile* const file);
 
 int main(int argc, char** argv) {
 	if (argc != 4) {
@@ -117,33 +134,82 @@ int main(int argc, char** argv) {
 
 	GeoLocNCFile glmyd09gafiles[nummyd09gafiles];
 	initGLFiles(&glmyd09gafiles[0], &myd09gafiles[0], nummyd09gafiles, MYD09GA);
-	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
-	}
 	GeoLocNCFile glatml2files[numatml2files];
 	initGLFiles(&glatml2files[0], &atml2files[0], numatml2files, MYDATML2);
 	GeoLocNCFile glwatermaskfile;
 	initGLFiles(&glwatermaskfile, &watermaskfile, 1, WATER_MASK);
 
-	FILE* lariverout = fopen(OUTPUT_FILEPATH "LARiver.csv", "a");
+	printf("MYD09GA (500m)\n");
+	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
+		profileGeoToMem(&glmyd09gafiles[i]);
+	}
+	printf("MYDATML2 (1000m)\n");
+	for (uint8_t i = 0; i < numatml2files; i++) {
+		profileGeoToMem(&glatml2files[i]);
+	}
+	printf("Water Mask (30m)\n");
+	profileGeoToMem(&glwatermaskfile);
+
+	/*
+	FILE* outputs[NUM_SITES];
+	for (uint8_t i = 0; i < NUM_SITES; i++) outputs[i] = fopen(studysites[i].outputfilepath, "a");
+
+	FILE* uselessfilelist = fopen(USELESS_FILE_LIST_FILEPATH, "a");
 
 	size_t n;
-	short cutoff = 3000;
+	short cutoff = 1000;
 	OutputRow rowtemp = {year, month, day, 0, 0};
-	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
-		printf("LA plume cutoff for MYD09GA file %d\n", i);
-		MemCoord* larivercr = calcCutoffRaster(&glmyd09gafiles[i], &glatml2files[0], numatml2files, (void*)(&cutoff), &lariver, STUDY_AREA_RADIUS, &n);
-		writeData(lariverout, &rowtemp);
-		if (n > 0) {
-			char* msg;
-			asprintf(&msg, "MYD09GA LA plume mask %zu pixels large", n);
-			printBox(msg);
-			free(msg);
-			writeData(lariverout, &rowtemp);
+	float datatemp;
+	for (uint8_t k = 0; k < NUM_SITES; k++) {
+		for (uint8_t i = 0; i < nummyd09gafiles; i++) {
+			printf("%s cutoff for MYD09GA file %d\n", studysites[k].longname, i);
+			MemCoord* larivercr = calcCutoffRaster(
+				&glmyd09gafiles[i], 
+				&glatml2files[0], 
+				numatml2files, 
+				&glwatermaskfile,
+				(void*)(&cutoff), 
+				&studysites[k].center, 
+				STUDY_AREA_RADIUS, 
+				&n);
+			if (n > 0) {
+				rowtemp.plumearea[0] = 0;
+				rowtemp.avgintensity[0] = 0;
+				for (size_t j = 0; j < n; j++) {
+					rowtemp.plumearea[0] += pow((float)(glmyd09gafiles[i].scale) / 1000, 2);
+					nc_get_var1_float(
+						glmyd09gafiles[i].fileid,
+						glmyd09gafiles[i].keyvarid,
+						memData(&larivercr[j]),
+						&datatemp);
+					rowtemp.avgintensity[0] += datatemp;
+				}
+				rowtemp.avgintensity[0] /= rowtemp.plumearea[0];
+				writeData(outputs[k], &rowtemp);
+
+				char* msg;
+				asprintf(&msg, "MYD09GA %s mask %zu pixels large", studysites[k].longname, n);
+				printBox(msg);
+				free(msg);
+			}
+			else {
+				size_t len;
+				nc_inq_path(glmyd09gafiles[i].fileid, &len, NULL);
+				char path[len];
+				nc_inq_path(glmyd09gafiles[i].fileid, NULL, path);
+				char* pathptr = strrchr(path, '/') + 1;
+				// little jank but we need to write a newline, not a null terminator
+				size_t pathlen = strlen(pathptr);
+				pathptr[pathlen - 1] = '\n';
+				fwrite(pathptr, pathlen, 1, uselessfilelist);
+			}
+			if (larivercr) free(larivercr);
 		}
-		if (larivercr) free(larivercr);
 	}
 
-	fclose(lariverout);
+	fclose(uselessfilelist);
+	for (uint8_t i = 0; i < NUM_SITES; i++) fclose(outputs[i]);
+	*/
 
 	for (uint8_t i = 0; i < numatml2files; i++) {
 		nc_close(atml2files[i]);
@@ -214,13 +280,37 @@ void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet 
 	for (uint8_t i = 0; i < numfiles; i++) {
 		switch (d) {
 			case MYDATML2:
-				dst[i] = (GeoLocNCFile){files[i], files[i], MYDATML2_LAT_ID, MYDATML2_LON_ID, MYDATML2_CLOUDMASK_ID, 1000, GEO_TO_MEM_MAX_ERR_ATML2, {0, 0}};
+				dst[i] = (GeoLocNCFile){
+					files[i], 
+					files[i], 
+					MYDATML2_LAT_ID, 
+					MYDATML2_LON_ID, 
+					MYDATML2_CLOUDMASK_ID, 
+					1000, 
+					GEO_TO_MEM_MAX_ERR_ATML2, 
+					{0, 0}};
 				break;
 			case L3SMI:
-				dst[i] = (GeoLocNCFile){files[i], files[i], L3SMI_LAT_ID, L3SMI_LON_ID, 2, 4638, GEO_TO_MEM_MAX_ERR_L3SMI, {0, 0}};
+				dst[i] = (GeoLocNCFile){
+					files[i], 
+					files[i], 
+					L3SMI_LAT_ID, 
+					L3SMI_LON_ID, 
+					2, 
+					4638, 
+					GEO_TO_MEM_MAX_ERR_L3SMI, 
+					{0, 0}};
 				break;
 			case MYD09GA:
-				dst[i] = (GeoLocNCFile){files[i], files[i], MYD09GA_LAT_ID, MYD09GA_LON_ID, MYD09GA_RRS_ID, 500, GEO_TO_MEM_MAX_ERR_MYD09GA, {0, 0}};
+				dst[i] = (GeoLocNCFile){
+					files[i], 
+					files[i], 
+					MYD09GA_LAT_ID, 
+					MYD09GA_LON_ID, 
+					MYD09GA_RRS_ID, 
+					500, 
+					GEO_TO_MEM_MAX_ERR_MYD09GA, 
+					{0, 0}};
 				break;
 			case WATER_MASK:
 				dst[i] = (GeoLocNCFile){
@@ -303,6 +393,7 @@ MemCoord* calcCutoffRaster(
 	const GeoLocNCFile* const file, 
 	const GeoLocNCFile* const clouds, 
 	const size_t numcloudfiles,
+	const GeoLocNCFile* const water,
 	const void* cutoff, 
 	const GeoCoord* const center, 
 	const float radius,
@@ -336,6 +427,7 @@ MemCoord* calcCutoffRaster(
 		return NULL;
 	}
 
+	// TODO: re-evaluate neccesity after swapping to pixel instead of degree radius
 	// we do a little swapping to make sure they're where we expect them to be in memory
 	// since they're definitely extreme bounds, we're really just making sure we can
 	// iterate predicatably
@@ -359,6 +451,7 @@ MemCoord* calcCutoffRaster(
 	int store;
 	char datatemp[4]; // facilitates moving up to 32 bytes of data
 	unsigned char cloudbyte;
+	float waterdst;
 	size_t cloudcounter;
 	int clear;
 	struct CloudMemCoord {size_t byte; MemCoord m;} cloudmcoord;
@@ -371,8 +464,18 @@ MemCoord* calcCutoffRaster(
 	for (current.y = origin.y; current.y < extent.y; current.y++) {
 		for (current.x = origin.x; current.x < extent.x; current.x++) {
 			gtemp = memToGeo(current, file);
-			if (sqrt(pow(current.x - memcenter.x, 2) + pow(current.y - memcenter.y, 2)) < pixelradius) {
+			if (sqrt(pow((float)current.x - (float)memcenter.x, 2) + pow((float)current.y - (float)memcenter.y, 2)) < pixelradius) {
 				totalinradius++;
+				mtemp = geoToMem(gtemp, water);
+				nc_get_var1_float(
+					water->fileid,
+					water->keyvarid,
+					memData(&mtemp),
+					&waterdst);
+				if (waterdst == 0) {
+					notwater++;
+					continue;
+				}
 				clear = 0;
 				for (cloudcounter = 0; cloudcounter < numcloudfiles; cloudcounter++) {
 					gtemp = memToGeo(current, file);
@@ -428,10 +531,12 @@ MemCoord* calcCutoffRaster(
 	printf("Stats:\n"
 			"\tPixels in radius: %zu\n"
 			"\t%% rasterized: %f\n"
+			"\t%% on land: %f\n"
 			"\t%% occluded by clouds: %f\n"
 			"\t%% below cutoff: %f\n", 
 			totalinradius, 
 			(float)rasterized / (float)totalinradius,
+			(float)notwater / (float)totalinradius,
 			(float)occludedbycloud / (float)totalinradius,
 			(float)belowcutoff / (float)totalinradius);
 
@@ -443,21 +548,22 @@ MemCoord* calcCutoffRaster(
 	result = realloc(result, sizeof(MemCoord) * *numpixels);
 	
 	// troubleshooting filewrite, should not write every analysis file i dont think
+	/*
 	size_t len;
 	nc_inq_path(file->fileid, &len, NULL);
 	char path[len];
 	nc_inq_path(file->fileid, NULL, path);
 	// this is a really janky way to do this but since this is just a debugging measure its whatever
 	char* template;
-	if (center == &lariver) {
+	if (center->lat == lariver.lat) {
 		template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/%s/lariver_%s";
-	} else if (center == &sgriver) {
+	} else if (center->lat == sgriver.lat) {
 		template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/%s/sgriver_%s";
-	} else if (center == &sariver) {
+	} else if (center->lat == sariver.lat) {
 		template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/%s/sariver_%s";
-	} else if (center == &bcreek) {
+	} else if (center->lat == bcreek.lat) {
 		template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/%s/bcreek_%s";
-	} else printf("unknown center addr in cutoff raster\n");
+	} else printf("unknown center lat in cutoff raster\n");
 	char* filepath;
 	char* suffix = strrchr(path, '/') + 1;
 	char* infix = strchr(path + 1, '/');
@@ -474,6 +580,7 @@ MemCoord* calcCutoffRaster(
 	printf("%s\n", filepath);
 	writePlumeRaster(result, *numpixels, origin, extent, &filepath[0], file);
 	free(filepath);
+	*/
 
 	return result;
 }
@@ -564,4 +671,22 @@ void writeData(FILE* f, const OutputRow* r) {
 			r->plumearea[0], r->avgintensity[0]);
 	fwrite(dst, 1, strlen(dst), f);
 	free(dst);
+}
+
+void profileGeoToMem(const GeoLocNCFile* const file) {
+	MemCoord m1 = {100, 100}, m2;
+	GeoCoord g = memToGeo(m1, file);
+	m2 = geoToMem2(g, file);
+	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
+	else printf("off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
+	m1 = (MemCoord){file->bounds.y - 100, file->bounds.x - 100};
+	g = memToGeo(m1, file);
+	m2 = geoToMem2(g, file);
+	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
+	else printf("off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
+	m1 = (MemCoord){file->bounds.y / 2, file->bounds.x / 2};
+	g = memToGeo(m1, file);
+	m2 = geoToMem2(g, file);
+	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
+	else printf("off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
 }

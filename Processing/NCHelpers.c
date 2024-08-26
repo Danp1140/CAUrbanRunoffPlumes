@@ -254,13 +254,6 @@ GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs) {
 
 size_t* memData(MemCoord* m) {return &m->y;}
 
-GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar) {
-	GeoCoord result;
-	nc_get_var1_float(geogroup, latvar, memData(&m), &result.lat);
-	nc_get_var1_float(geogroup, lonvar, memData(&m), &result.lon);
-	return result;
-}
-
 GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f) {
 	GeoCoord result;
 	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&m) + f->latoffset, &result.lat);
@@ -268,127 +261,58 @@ GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f) {
 	return result;
 }
 
-MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int lonvar) {
-	MemCoord bounds;
-	int nlatdims, nlondims;
-	nc_inq_varndims(geogroup, latvar, &nlatdims);
-	nc_inq_varndims(geogroup, lonvar, &nlondims);
-	int latdimids[nlatdims], londimids[nlondims];
-	nc_inq_vardimid(geogroup, latvar, &latdimids[0]);
-	nc_inq_vardimid(geogroup, lonvar, &londimids[0]);
-	size_t offset = 0;
-	if (nlatdims == nlondims) {
-		size_t dimlen;
-		if (nlatdims == 2) {
-			// for some reason y is stored before x
-			// this assumes dims are always stored y-res @ 0, x-res @ 1
-			nc_inq_dimlen(geogroup, latdimids[0], &dimlen);
-			bounds.y = dimlen;
-			nc_inq_dimlen(geogroup, latdimids[1], &dimlen);
-			bounds.x = dimlen;
-		}
-		// if ndims == 1, we'll assume a L3SMI-style lin indep lat & lon
-		else if (nlatdims == 1) {
-			offset = 1;
-			nc_inq_dimlen(geogroup, latdimids[0], &dimlen);
-			bounds.y = dimlen;
-			nc_inq_dimlen(geogroup, londimids[0], &dimlen);
-			bounds.x = dimlen;
-		}
-	}
-	else {
-		printf("unknown lat/lon dimension format in geoToMem!!\n");
-	}
-
-	MemCoord guess = {bounds.y / 2, bounds.x / 2};
-	GeoCoord currentGeo, dgdmx, dgdmy;
-	do {
-		nc_get_var1_float(geogroup, latvar, memData(&guess), &currentGeo.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guess) + offset, &currentGeo.lon);
-		/*
-		printf("new guess (%zu, %zu)\n", guess.x, guess.y);
-		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
-		*/
-
-		guess.x++;
-		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmx.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guess) + offset, &dgdmx.lon);
-		guess.x--;
-		dgdmx = geoSub(&dgdmx, &currentGeo);
-
-		guess.y++;
-		nc_get_var1_float(geogroup, latvar, memData(&guess), &dgdmy.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guess) + offset, &dgdmy.lon);
-		guess.y--;
-		dgdmy = geoSub(&dgdmy, &currentGeo);
-
-		/*
-		printf("dg/dm_x = (%f, %f)\n", dgdmx.lat, dgdmx.lon);
-		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
-		*/
-
-		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
-		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
-		guess.x += inc > 0 ? ceil(inc) : floor(inc);
-		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
-		guess.y += inc > 0 ? ceil(inc) : floor(inc);
-	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR_L3SMI);
-	return guess;
+GeoCoord subpixelMemToGeo(float* m, const GeoLocNCFile* const f) {
+	// nearest filtering
+	GeoCoord result;
+	MemCoord nearest = {round(m[0]), round(m[1])};
+	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&nearest) + f->latoffset, &result.lat);
+	nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&nearest) + f->lonoffset, &result.lon);
+	if (m[0] < 0 || m[1] < 0 || m[0] > (float)f->bounds.y - 1 || m[1] > (float) f->bounds.y - 1) 
+		return (GeoCoord){-999, -999};
+	// linear filtering (incomplete)
+	/*
+	GeoCoord result, gtemp;
+	MemCoord m0 = {round(m[0]), round(m[1])}, m1 = m0, m2 = m0;
+	if ((float)m0.y > m[0]) m1.y++;
+	else m1.y--;
+	if ((float)m0.x > m[1]) m2.x++;
+	else m2.y--;
+	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&m0) + f->latoffset, &result.lat);
+	nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&m0) + f->lonoffset, &result.lon);
+	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&m1) + f->latoffset, &gtemp.lat);
+	nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&m1) + f->lonoffset, &gtemp.lon);
+	result.lat += gtemp.lat * (float)m0.y - m[0];
+	result.lon += gtemp.lon * (float)m0.y - m[0];
+	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&m2) + f->latoffset, &gtemp.lat);
+	nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&m2) + f->lonoffset, &gtemp.lon);
+	result.lat += gtemp.lat;
+	result.lon += gtemp.lon;
+	*/
+	return result;
 }
 
 MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
-	MemCoord bounds;
-	int nlatdims, nlondims;
-	nc_inq_varndims(f->geogroupid, f->latvarid, &nlatdims);
-	nc_inq_varndims(f->geogroupid, f->lonvarid, &nlondims);
-	int latdimids[nlatdims], londimids[nlondims];
-	nc_inq_vardimid(f->geogroupid, f->latvarid, &latdimids[0]);
-	nc_inq_vardimid(f->geogroupid, f->lonvarid, &londimids[0]);
-	size_t offset = 0;
-	if (nlatdims == nlondims) {
-		size_t dimlen;
-		if (nlatdims == 2) {
-			// for some reason y is stored before x
-			// this assumes dims are always stored y-res @ 0, x-res @ 1
-			nc_inq_dimlen(f->geogroupid, latdimids[0], &dimlen);
-			bounds.y = dimlen;
-			nc_inq_dimlen(f->geogroupid, latdimids[1], &dimlen);
-			bounds.x = dimlen;
-		}
-		// if ndims == 1, we'll assume a L3SMI-style lin indep lat & lon
-		else if (nlatdims == 1) {
-			offset = 1;
-			nc_inq_dimlen(f->geogroupid, latdimids[0], &dimlen);
-			bounds.y = dimlen;
-			nc_inq_dimlen(f->geogroupid, londimids[0], &dimlen);
-			bounds.x = dimlen;
-		}
-	}
-	else {
-		printf("unknown lat/lon dimension format in geoToMem!!\n");
-	}
-
-	MemCoord guess = {f->bounds.y / 2, f->bounds.x / 2};
+	MemCoord guess = {f->bounds.y / 4, f->bounds.x / 4};
 	GeoCoord currentGeo, dgdmx, dgdmy;
 	size_t counter = 0;
 	float incx, incy, totarget;
 	do {
-		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &currentGeo.lat);
-		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &currentGeo.lon);
+		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess) + f->latoffset, &currentGeo.lat);
+		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + f->lonoffset, &currentGeo.lon);
 		/*
 		printf("new guess (%zu, %zu)\n", guess.x, guess.y);
 		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
 		*/
 
 		guess.x++;
-		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &dgdmx.lat);
-		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &dgdmx.lon);
+		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess) + f->latoffset, &dgdmx.lat);
+		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + f->lonoffset, &dgdmx.lon);
 		guess.x--;
 		dgdmx = geoSub(&dgdmx, &currentGeo);
 
 		guess.y++;
-		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess), &dgdmy.lat);
-		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + offset, &dgdmy.lon);
+		nc_get_var1_float(f->geogroupid, f->latvarid, memData(&guess) + f->latoffset, &dgdmy.lat);
+		nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&guess) + f->lonoffset, &dgdmy.lon);
 		guess.y--;
 		dgdmy = geoSub(&dgdmy, &currentGeo);
 
@@ -401,8 +325,13 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
 		totarget = geoLen(&adjustedtarget);
 		if (totarget < f->maxgeotomemerr) break;
+		// original code in commit
 		incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) * totarget * 100;
 		incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) * totarget * 100;
+		/*
+		incx = (totarget - geoDist(&adjustedtarget, &dgdmx)) * totarget * f->bounds.x;
+		incy = (totarget - geoDist(&adjustedtarget, &dgdmy)) * totarget * f->bounds.y;
+		*/
 		if (fabsf(incx) < 1 && fabsf(incy) < 1) {
 			if (fabsf(incx) > fabsf(incy)) {
 				incx /= fabsf(incy);
@@ -435,55 +364,311 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 	return guess;
 }
 
-MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar) {
-	MemCoord bounds;
-	int ndims;
-	nc_inq_varndims(geogroup, latvar, &ndims);
-	int dimids[ndims];
-	nc_inq_vardimid(geogroup, latvar, &dimids[0]);
-	size_t dimlen;
-	// for some reason y is stored before x
-	nc_inq_dimlen(geogroup, dimids[0], &dimlen);
-	bounds.y = dimlen;
-	nc_inq_dimlen(geogroup, dimids[1], &dimlen);
-	bounds.x = dimlen;
+MemCoord geoToMem2(GeoCoord g, const GeoLocNCFile* const f) {
+	// MemCoord simp[3] = {{100, 100}, {100, f->bounds.x - 100}, {f->bounds.y - 100, (f->bounds.x - 100) / 2 + 100}};
+	const size_t width = 100;
+	float** simp;
+	simp = (float**)malloc(3 * sizeof(float*));
+	for (uint8_t i = 0; i < 3; i++) {
+		simp[i] = (float*)malloc(2 * sizeof(float));
+	}
+	simp[0][0] = f->bounds.y / 2 - width;
+	simp[0][1] = f->bounds.x / 2 - width;
+	simp[1][0] = f->bounds.y / 2 - width;
+	simp[1][1] = f->bounds.x / 2 + width;
+	simp[2][0] = f->bounds.y / 2 + width;
+	simp[2][1] = f->bounds.x / 2;
+	/*
+	MemCoord simp[3] = {
+		{f->bounds.y / 2 - width, f->bounds.x / 2 - width}, 
+		{f->bounds.y / 2 - width, f->bounds.x / 2 + width},
+		{f->bounds.y / 2 + width, f->bounds.x / 2}
+	};
+	*/
+	/*
+	MemCoord simp[3];
+	simp[0] = (MemCoord){f->bounds.y / 2, f->bounds.x / 2};
+	simp[1] = (MemCoord){simp[0].y + 100, simp[0].x};
+	simp[2] = (MemCoord){simp[0].y, simp[0].x + 100};
+	*/
+	simplex2(simp, g, f, 1, 2, 0.5, 0.5);
+	// should prob actually do some centroid
+	// return simp[0];
+	MemCoord result = {round(simp[0][0]), round(simp[0][1])};
+	for (uint8_t i = 0; i < 3; i++) {
+		free(simp[i]);
+	}
+	free(simp);
+	return result;
+}
 
-	// guess stores y first, then x
-	float guess[2] = {(float)bounds.x / 2., (float)bounds.y / 2.};
-	// for access
-	MemCoord guessmem;
-	GeoCoord currentGeo, dgdmx, dgdmy;
-	do {
-		guessmem = (MemCoord){(size_t)guess[0], (size_t)guess[1]};
-		nc_get_var1_float(geogroup, latvar, memData(&guessmem), &currentGeo.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guessmem), &currentGeo.lon);
-		/*
-		printf("new guess (%f, %f)\n", guess[1], guess[0]);
-		printf("corresponds to geo (%f, %f)\n", currentGeo.lat, currentGeo.lon);
-		*/
+void simplex(MemCoord* insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma) {
+	for (uint8_t i = 0; i < 3; i++) {
+		printf("{%zu, %zu}\n", insimp[i].x, insimp[i].y);
+		// if (i > 0 && insimp[i].x == insimp[0].x && insimp[i].y == insimp[0].y) return;
+	}
+	if (insimp[0].x == insimp[1].x 
+		&& insimp[0].y == insimp[0].y 
+		&& insimp[0].x == insimp[2].x
+		&& insimp[0].y == insimp[2].y) {
+		printf("converged to point\n");
+		return;
+	}
+	// Setup
+	
+	GeoCoord gtemp;
+	// could be combined with below
+	gtemp = memToGeo(insimp[0], f);
+	if (geoDist(&g, &gtemp) <= f->maxgeotomemerr) return;
 
-		guessmem = (MemCoord){guess[0], guess[1] + GEO_TO_MEM2_STEP};
-		nc_get_var1_float(geogroup, latvar, memData(&guessmem), &dgdmx.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guessmem), &dgdmx.lon);
-		dgdmx = geoSub(&dgdmx, &currentGeo);
+	float fpoints[3];
+	for (uint8_t i = 0; i < 3; i++) {
+		gtemp = memToGeo(insimp[i], f);
+		fpoints[i] = geoDist(&g, &gtemp);
+	}
+	// qsort(&fpoints[0], 3, sizeof(float), fcomp);
+	float swaptemp;
+	MemCoord memswaptemp;
+	if (fpoints[0] > fpoints[1]) {
+		swaptemp = fpoints[0];
+		fpoints[0] = fpoints[1];
+		fpoints[1] = swaptemp;
+		memswaptemp = insimp[0];
+		insimp[0] = insimp[1];
+		insimp[1] = memswaptemp;
+	}
+	if (fpoints[2] < fpoints[1]) {
+		swaptemp = fpoints[1];
+		fpoints[1] = fpoints[2];
+		fpoints[2] = swaptemp;
+		memswaptemp = insimp[1];
+		insimp[1] = insimp[2];
+		insimp[2] = memswaptemp;
+		if (fpoints[1] < fpoints[0]) {
+			swaptemp = fpoints[0];
+			fpoints[0] = fpoints[1];
+			fpoints[1] = swaptemp;
+			memswaptemp = insimp[0];
+			insimp[0] = insimp[1];
+			insimp[1] = memswaptemp;
+		}
+	}
+	MemCoord centroid = (MemCoord){(int)insimp[0].y + ((int)insimp[1].y - (int)insimp[0].y) / 2, (int)insimp[0].x + ((int)insimp[1].x - (int)insimp[0].x) / 2};
 
-		guessmem = (MemCoord){guess[0] + GEO_TO_MEM2_STEP, guess[1]};
-		nc_get_var1_float(geogroup, latvar, memData(&guessmem), &dgdmy.lat);
-		nc_get_var1_float(geogroup, lonvar, memData(&guessmem), &dgdmy.lon);
-		dgdmy = geoSub(&dgdmy, &currentGeo);
+	// Reflection
+	// MemCoord refl = (MemCoord){centroid.y + alpha * sizeTypeSub(centroid.y, insimp[2].y), centroid.x + alpha * sizeTypeSub(centroid.x, insimp[2].x)};
+	MemCoord refl = derivedVector(f, &centroid, alpha, &centroid, &insimp[2]);
+	gtemp = memToGeo(refl, f);
+	float frefl = geoDist(&g, &gtemp);
+	if (fpoints[0] <= frefl && frefl <= fpoints[2]) {
+		insimp[2] = refl;
+		printf("reflecting\n");
+		simplex(insimp, g, f, alpha, gamma, rho, sigma);
+		return;
+	}
 
-		/*
-		printf("dg/dm_x = (%f, %f)\n", dgdmx.lat, dgdmx.lon);
-		printf("dg/dm_y = (%f, %f)\n", dgdmy.lat, dgdmy.lon);
-		*/
+	// Expansion
+	if (fpoints[0] >= frefl) {
+		// MemCoord exp = (MemCoord){centroid.y + gamma * sizeTypeSub(refl.y, centroid.y), centroid.x + gamma * sizeTypeSub(refl.x, centroid.x)};
+		MemCoord exp = derivedVector(f, &centroid, gamma, &refl, &centroid);
+		gtemp = memToGeo(exp, f);
+		float fexp = geoDist(&g, &gtemp);
+		printf("expanding\n");
+		if (fexp < frefl) {
+			insimp[2] = exp;
+			simplex(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+		else {
+			insimp[2] = refl;
+			simplex(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+	}
 
-		GeoCoord adjustedtarget = geoSub(&g, &currentGeo);
-		float inc = geoDot(&dgdmx, &adjustedtarget) / geoLen(&dgdmx);
-		guess[1] += inc;
-		inc = geoDot(&dgdmy, &adjustedtarget) / geoLen(&dgdmy);
-		guess[0] += inc;
-	} while (geoDist(&g, &currentGeo) > GEO_TO_MEM_MAX_ERR_L3SMI);
-	return (MemCoord){guess[0], guess[1]};
+	// Contraction
+	if (frefl < fpoints[2]) {
+		// MemCoord cont = (MemCoord){centroid.y + rho * sizeTypeSub(refl.y, centroid.y), centroid.x + rho * sizeTypeSub(refl.x, centroid.x)};
+		MemCoord cont = derivedVector(f, &centroid, rho, &refl, &centroid);
+		gtemp = memToGeo(cont, f);
+		float fcont = geoDist(&g, &gtemp);
+		if (fcont < frefl) {
+			insimp[2] = cont;
+			printf("outward contracting\n");
+			simplex(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+	} else {
+		// MemCoord cont = (MemCoord){centroid.y + rho * sizeTypeSub(insimp[2].y, centroid.y), centroid.x + rho * sizeTypeSub(insimp[2].x, centroid.x)};
+		MemCoord cont = derivedVector(f, &centroid, rho, &insimp[2], &centroid);
+		gtemp = memToGeo(cont, f);
+		float fcont = geoDist(&g, &gtemp);
+		if (fcont < fpoints[2]) {
+			insimp[2] = cont;
+			printf("inward contracting\n");
+			simplex(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+	}
+
+	// Shrink
+	for (uint8_t i = 1; i < 3; i++) {
+		insimp[i] = derivedVector(f, &insimp[0], sigma, &insimp[i], &insimp[0]);
+		// insimp[i].x = insimp[0].x + sigma * sizeTypeSub(insimp[i].x, insimp[0].x);
+		// insimp[i].y = insimp[0].y + sigma * sizeTypeSub(insimp[i].y, insimp[0].y);
+	}
+	printf("shrinking\n");
+	simplex(insimp, g, f, alpha, gamma, rho, sigma);
+	return;
+}
+
+void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma) {
+	if (insimp[0][1] == insimp[1][1] 
+		&& insimp[0][0] == insimp[0][0] 
+		&& insimp[0][1] == insimp[2][1]
+		&& insimp[0][0] == insimp[2][0]) {
+		printf("converged to point\n");
+		return;
+	}
+	// Setup
+	
+	GeoCoord gtemp;
+	// could be combined with below
+	gtemp = subpixelMemToGeo(insimp[0], f);
+
+	float fpoints[3];
+	for (uint8_t i = 0; i < 3; i++) {
+		gtemp = subpixelMemToGeo(insimp[i], f);
+		fpoints[i] = geoDist(&g, &gtemp);
+	}
+	float swaptemp;
+	float memswaptemp[2];
+	if (fpoints[0] > fpoints[1]) {
+		swaptemp = fpoints[0];
+		fpoints[0] = fpoints[1];
+		fpoints[1] = swaptemp;
+		memcpy(memswaptemp, insimp[0], 2 * sizeof(float));
+		memcpy(insimp[0], insimp[1], 2 * sizeof(float));
+		memcpy(insimp[1], memswaptemp, 2 * sizeof(float));
+	}
+	if (fpoints[2] < fpoints[1]) {
+		swaptemp = fpoints[1];
+		fpoints[1] = fpoints[2];
+		fpoints[2] = swaptemp;
+		memcpy(memswaptemp, insimp[1], 2 * sizeof(float));
+		memcpy(insimp[1], insimp[2], 2 * sizeof(float));
+		memcpy(insimp[2], memswaptemp, 2 * sizeof(float));
+		if (fpoints[1] < fpoints[0]) {
+			swaptemp = fpoints[0];
+			fpoints[0] = fpoints[1];
+			fpoints[1] = swaptemp;
+			memcpy(memswaptemp, insimp[0], 2 * sizeof(float));
+			memcpy(insimp[0], insimp[1], 2 * sizeof(float));
+			memcpy(insimp[1], memswaptemp, 2 * sizeof(float));
+		}
+	}
+	gtemp = subpixelMemToGeo(insimp[0], f);
+	if (geoDist(&g, &gtemp) <= f->maxgeotomemerr) return;
+
+	float centroid[2] = {insimp[0][0] + (insimp[1][0] - insimp[0][0]) / 2, insimp[0][1] + (insimp[1][1] - insimp[0][1]) / 2};
+
+	// for (uint8_t i = 0; i < 3; i++) printf("[%d]: {%f, %f} => %f\n", (int)i, insimp[i][1], insimp[i][0], fpoints[i]);
+
+	// Reflection
+	float refl[2];
+	derivedVector2(&refl[0], f, centroid, alpha, centroid, insimp[2]);
+	gtemp = subpixelMemToGeo(refl, f);
+	float frefl = geoDist(&g, &gtemp);
+	if (fpoints[0] <= frefl && frefl <= fpoints[2]) {
+		memcpy(insimp[2], refl, 2 * sizeof(float));
+		printf("reflecting\n");
+		simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+		return;
+	}
+
+	// Expansion
+	if (fpoints[0] >= frefl) {
+		float exp[2];
+		derivedVector2(&exp[0], f, centroid, gamma, refl, centroid);
+		gtemp = subpixelMemToGeo(exp, f);
+		float fexp = geoDist(&g, &gtemp);
+		printf("expanding\n");
+		if (fexp < frefl) {
+			memcpy(insimp[2], exp, 2 * sizeof(float));
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+		else {
+			memcpy(insimp[2], refl, 2 * sizeof(float));
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+	}
+
+	// Contraction
+	if (frefl < fpoints[2]) {
+		float cont[2];
+		derivedVector2(&cont[0], f, centroid, rho, refl, centroid);
+		gtemp = subpixelMemToGeo(cont, f);
+		float fcont = geoDist(&g, &gtemp);
+		if (fcont < frefl) {
+			memcpy(insimp[2], cont, 2 * sizeof(float));
+			printf("outward contracting\n");
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+	} else {
+		float cont[2];
+		derivedVector2(&cont[0], f, centroid, rho, insimp[2], centroid);
+		gtemp = subpixelMemToGeo(cont, f);
+		float fcont = geoDist(&g, &gtemp);
+		if (fcont < fpoints[2]) {
+			memcpy(insimp[2], cont, 2 * sizeof(float));
+			printf("inward contracting\n");
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			return;
+		}
+	}
+
+	// Shrink
+	for (uint8_t i = 1; i < 3; i++) {
+		derivedVector2(insimp[i], f, insimp[0], sigma, insimp[i], insimp[0]);
+	}
+	printf("shrinking\n");
+	simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+	return;
+}
+
+MemCoord derivedVector(const GeoLocNCFile* const f, const MemCoord* const centroid, float m, const MemCoord* const v1, const MemCoord* const v2) {
+	int xtemp = (int)centroid->x + m * ((int)v1->x - (int)v2->x);
+	int ytemp = (int)centroid->y + m * ((int)v1->y - (int)v2->y);
+	if (xtemp >= f->bounds.x) xtemp = f->bounds.x - 1;
+	if (ytemp >= f->bounds.y) ytemp = f->bounds.y - 1;
+	return (MemCoord){ytemp < 0 ? 0 : (size_t)ytemp, xtemp < 0 ? 0 : (size_t)xtemp};
+}
+
+void derivedVector2(float* dst, const GeoLocNCFile* const f, const float* const centroid, float m, const float* const v1, const float* const v2) {
+	dst[0] = centroid[0] + m * (v1[0] - v2[0]);
+	dst[1] = centroid[1] + m * (v1[1] - v2[1]);
+	/*
+	if (dst[0] > (float)f->bounds.y - 1) dst[0] = f->bounds.y - 1;
+	else if (dst[0] < 0) dst[0] = 0;
+	if (dst[1] > (float)f->bounds.x - 1) dst[1] = f->bounds.x - 1;
+	else if (dst[1] < 0) dst[1] = 0;
+	*/
+}
+
+size_t sizeTypeSub(size_t lhs, size_t rhs) {
+	if (lhs < rhs) return 0;
+	return lhs - rhs;
+}
+
+int fcomp(const void* lhs, const void* rhs) {
+	float flhs = *((float*)lhs);
+	float frhs = *((float*)rhs);
+	if (flhs < frhs) return -1;
+	if (flhs > frhs) return 1;
+	else return 0;
 }
 
 char** formulateMYDATML2URLs(uint16_t year, uint8_t month, uint8_t day, size_t* numurls) {

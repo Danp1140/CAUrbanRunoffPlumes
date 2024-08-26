@@ -71,10 +71,10 @@ dc = getDataCube(con, "SENTINEL1_GRD", ["VV", "VH"], 2016, 1, 1, lariver)
 
 result = dc.save_result(format='netCDF')
 
-# job = result.create_job()
+job = result.create_job()
 
-# job.start_and_wait()
+job.start_and_wait()
 
-job = result.execute_batch()
+#job = result.execute_batch()
 
 job.get_results().download_files("test")

@@ -9,9 +9,9 @@
 
 #define MAX_CSV_ENTRY_LEN 128
 #define GEO_TO_MEM_MAX_ERR_ATML2 0.2 
-#define GEO_TO_MEM_MAX_ERR_MYD09GA 0.005 
+#define GEO_TO_MEM_MAX_ERR_MYD09GA 0.005
 #define GEO_TO_MEM_MAX_ERR_L3SMI 0.2 
-#define GEO_TO_MEM_MAX_ERR_WATER_MASK 0.0001
+#define GEO_TO_MEM_MAX_ERR_WATER_MASK 0.0008 // theoretically could be lower
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 #define SORT_SCORE_DLAT 1e-4
 #define GEO_TO_MEM_OPOUT 1000 // num loops before we give up ongeoToMem
@@ -99,13 +99,26 @@ GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int l
 
 GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f);
 
+GeoCoord subpixelMemToGeo(float* m, const GeoLocNCFile* const f);
+
 // TODO: phase out in favor of below version using GeoLocNCFile arg (same with memToGeo)
 MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int lonvar);
 
 MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f);
 
-// geoToMem2 uses a float version of MemCoord internally to support sub-pixel steps
-MemCoord geoToMem2(GeoCoord g, int geogroup, int latvar, int lonvar);
+MemCoord geoToMem2(GeoCoord g, const GeoLocNCFile* const f);
+
+void simplex(MemCoord* insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma);
+
+void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma);
+
+size_t sizeTypeSub(size_t lhs, size_t rhs);
+
+MemCoord derivedVector(const GeoLocNCFile* const f, const MemCoord* const centroid, float m, const MemCoord* const v1, const MemCoord* const v2);
+
+void derivedVector2(float* dst, const GeoLocNCFile* const f, const float* const centroid, float m, const float* const v1, const float* const v2);
+
+int fcomp(const void* lhs, const void* rhs);
 
 char** formulateMYDATML2URLs(uint16_t year, uint8_t month, uint8_t day, size_t* numurls);
 
