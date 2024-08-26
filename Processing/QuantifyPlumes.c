@@ -139,18 +139,19 @@ int main(int argc, char** argv) {
 	GeoLocNCFile glwatermaskfile;
 	initGLFiles(&glwatermaskfile, &watermaskfile, 1, WATER_MASK);
 
-	printf("MYD09GA (500m)\n");
+	/*
+	printf("MYD09GA (500m, %zu x %zu)\n", glmyd09gafiles[0].bounds.x, glmyd09gafiles[0].bounds.y);
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
 		profileGeoToMem(&glmyd09gafiles[i]);
 	}
-	printf("MYDATML2 (1000m)\n");
+	printf("MYDATML2 (1000m, %zu x %zu)\n", glatml2files[0].bounds.x, glatml2files[0].bounds.y);
 	for (uint8_t i = 0; i < numatml2files; i++) {
 		profileGeoToMem(&glatml2files[i]);
 	}
-	printf("Water Mask (30m)\n");
+	printf("Water Mask (30m, %zu x %zu)\n", glwatermaskfile.bounds.x, glwatermaskfile.bounds.y);
 	profileGeoToMem(&glwatermaskfile);
+	*/
 
-	/*
 	FILE* outputs[NUM_SITES];
 	for (uint8_t i = 0; i < NUM_SITES; i++) outputs[i] = fopen(studysites[i].outputfilepath, "a");
 
@@ -163,7 +164,7 @@ int main(int argc, char** argv) {
 	for (uint8_t k = 0; k < NUM_SITES; k++) {
 		for (uint8_t i = 0; i < nummyd09gafiles; i++) {
 			printf("%s cutoff for MYD09GA file %d\n", studysites[k].longname, i);
-			MemCoord* larivercr = calcCutoffRaster(
+			MemCoord* raster = calcCutoffRaster(
 				&glmyd09gafiles[i], 
 				&glatml2files[0], 
 				numatml2files, 
@@ -180,7 +181,7 @@ int main(int argc, char** argv) {
 					nc_get_var1_float(
 						glmyd09gafiles[i].fileid,
 						glmyd09gafiles[i].keyvarid,
-						memData(&larivercr[j]),
+						memData(&raster[j]),
 						&datatemp);
 					rowtemp.avgintensity[0] += datatemp;
 				}
@@ -203,13 +204,12 @@ int main(int argc, char** argv) {
 				pathptr[pathlen - 1] = '\n';
 				fwrite(pathptr, pathlen, 1, uselessfilelist);
 			}
-			if (larivercr) free(larivercr);
+			if (raster) free(raster);
 		}
 	}
 
 	fclose(uselessfilelist);
 	for (uint8_t i = 0; i < NUM_SITES; i++) fclose(outputs[i]);
-	*/
 
 	for (uint8_t i = 0; i < numatml2files; i++) {
 		nc_close(atml2files[i]);
@@ -548,7 +548,6 @@ MemCoord* calcCutoffRaster(
 	result = realloc(result, sizeof(MemCoord) * *numpixels);
 	
 	// troubleshooting filewrite, should not write every analysis file i dont think
-	/*
 	size_t len;
 	nc_inq_path(file->fileid, &len, NULL);
 	char path[len];
@@ -580,7 +579,6 @@ MemCoord* calcCutoffRaster(
 	printf("%s\n", filepath);
 	writePlumeRaster(result, *numpixels, origin, extent, &filepath[0], file);
 	free(filepath);
-	*/
 
 	return result;
 }
@@ -678,15 +676,15 @@ void profileGeoToMem(const GeoLocNCFile* const file) {
 	GeoCoord g = memToGeo(m1, file);
 	m2 = geoToMem2(g, file);
 	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
-	else printf("off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
+	else printf("close to origin off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
 	m1 = (MemCoord){file->bounds.y - 100, file->bounds.x - 100};
 	g = memToGeo(m1, file);
 	m2 = geoToMem2(g, file);
 	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
-	else printf("off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
+	else printf("far from origin off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
 	m1 = (MemCoord){file->bounds.y / 2, file->bounds.x / 2};
 	g = memToGeo(m1, file);
 	m2 = geoToMem2(g, file);
 	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
-	else printf("off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
+	else printf("middle off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
 }

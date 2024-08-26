@@ -263,12 +263,35 @@ GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f) {
 
 GeoCoord subpixelMemToGeo(float* m, const GeoLocNCFile* const f) {
 	// nearest filtering
-	GeoCoord result;
-	MemCoord nearest = {round(m[0]), round(m[1])};
-	nc_get_var1_float(f->geogroupid, f->latvarid, memData(&nearest) + f->latoffset, &result.lat);
-	nc_get_var1_float(f->geogroupid, f->lonvarid, memData(&nearest) + f->lonoffset, &result.lon);
+	/*
+	if (m[0] < 0) {
+		GeoCoord result;
+		result = memToGeo((MemCoord){0, round(m[1])}, f);
+		result.lat += m[0];
+		return result;
+	}
+	if (m[0] > (float)f->bounds.y) {
+		GeoCoord result;
+		result = memToGeo((MemCoord){f->bounds.y - 1, round(m[1])}, f);
+		result.lat += m[0] - f->bounds.y - 1;
+		return result;
+	}
+	if (m[1] < 0) {
+		GeoCoord result;
+		result = memToGeo((MemCoord){round(m[1]), 0}, f);
+		result.lon += m[1];
+		return result;
+	}
+	if (m[1] > (float)f->bounds.x) {
+		GeoCoord result;
+		result = memToGeo((MemCoord){round(m[1]), f->bounds.x - 1}, f);
+		result.lon += m[1] - f->bounds.x - 1;
+		return result;
+	}
+	*/
 	if (m[0] < 0 || m[1] < 0 || m[0] > (float)f->bounds.y - 1 || m[1] > (float) f->bounds.y - 1) 
 		return (GeoCoord){-999, -999};
+	return memToGeo((MemCoord){round(m[0]), round(m[1])}, f);
 	// linear filtering (incomplete)
 	/*
 	GeoCoord result, gtemp;
@@ -288,7 +311,6 @@ GeoCoord subpixelMemToGeo(float* m, const GeoLocNCFile* const f) {
 	result.lat += gtemp.lat;
 	result.lon += gtemp.lon;
 	*/
-	return result;
 }
 
 MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
@@ -365,40 +387,19 @@ MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f) {
 }
 
 MemCoord geoToMem2(GeoCoord g, const GeoLocNCFile* const f) {
-	// MemCoord simp[3] = {{100, 100}, {100, f->bounds.x - 100}, {f->bounds.y - 100, (f->bounds.x - 100) / 2 + 100}};
-	const size_t width = 100;
-	float** simp;
-	simp = (float**)malloc(3 * sizeof(float*));
-	for (uint8_t i = 0; i < 3; i++) {
-		simp[i] = (float*)malloc(2 * sizeof(float));
-	}
-	simp[0][0] = f->bounds.y / 2 - width;
+	const size_t width = f->bounds.x / 4,
+	      height = f->bounds.y / 4;
+	float simp[3][2];
+	simp[0][0] = f->bounds.y / 2 - height;
 	simp[0][1] = f->bounds.x / 2 - width;
-	simp[1][0] = f->bounds.y / 2 - width;
+	simp[1][0] = f->bounds.y / 2 - height;
 	simp[1][1] = f->bounds.x / 2 + width;
-	simp[2][0] = f->bounds.y / 2 + width;
+	simp[2][0] = f->bounds.y / 2 + height;
 	simp[2][1] = f->bounds.x / 2;
-	/*
-	MemCoord simp[3] = {
-		{f->bounds.y / 2 - width, f->bounds.x / 2 - width}, 
-		{f->bounds.y / 2 - width, f->bounds.x / 2 + width},
-		{f->bounds.y / 2 + width, f->bounds.x / 2}
-	};
-	*/
-	/*
-	MemCoord simp[3];
-	simp[0] = (MemCoord){f->bounds.y / 2, f->bounds.x / 2};
-	simp[1] = (MemCoord){simp[0].y + 100, simp[0].x};
-	simp[2] = (MemCoord){simp[0].y, simp[0].x + 100};
-	*/
-	simplex2(simp, g, f, 1, 2, 0.5, 0.5);
-	// should prob actually do some centroid
-	// return simp[0];
+	float* simptemp[3];
+	for (uint8_t i = 0; i < 3; i++) simptemp[i] = &simp[i][0];
+	simplex2(simptemp, g, f, 1, 2, 0.5, 0.5);
 	MemCoord result = {round(simp[0][0]), round(simp[0][1])};
-	for (uint8_t i = 0; i < 3; i++) {
-		free(simp[i]);
-	}
-	free(simp);
 	return result;
 }
 
@@ -523,6 +524,7 @@ void simplex(MemCoord* insimp, GeoCoord g, const GeoLocNCFile* const f, float al
 }
 
 void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma) {
+	// Setup
 	if (insimp[0][1] == insimp[1][1] 
 		&& insimp[0][0] == insimp[0][0] 
 		&& insimp[0][1] == insimp[2][1]
@@ -530,12 +532,7 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 		printf("converged to point\n");
 		return;
 	}
-	// Setup
-	
 	GeoCoord gtemp;
-	// could be combined with below
-	gtemp = subpixelMemToGeo(insimp[0], f);
-
 	float fpoints[3];
 	for (uint8_t i = 0; i < 3; i++) {
 		gtemp = subpixelMemToGeo(insimp[i], f);
@@ -569,7 +566,6 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 	}
 	gtemp = subpixelMemToGeo(insimp[0], f);
 	if (geoDist(&g, &gtemp) <= f->maxgeotomemerr) return;
-
 	float centroid[2] = {insimp[0][0] + (insimp[1][0] - insimp[0][0]) / 2, insimp[0][1] + (insimp[1][1] - insimp[0][1]) / 2};
 
 	// for (uint8_t i = 0; i < 3; i++) printf("[%d]: {%f, %f} => %f\n", (int)i, insimp[i][1], insimp[i][0], fpoints[i]);
@@ -579,20 +575,24 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 	derivedVector2(&refl[0], f, centroid, alpha, centroid, insimp[2]);
 	gtemp = subpixelMemToGeo(refl, f);
 	float frefl = geoDist(&g, &gtemp);
-	if (fpoints[0] <= frefl && frefl <= fpoints[2]) {
+	if (fpoints[0] <= frefl && frefl < fpoints[1]) {
 		memcpy(insimp[2], refl, 2 * sizeof(float));
+#ifdef VERBOSE_GEOTOMEM2
 		printf("reflecting\n");
+#endif
 		simplex2(insimp, g, f, alpha, gamma, rho, sigma);
 		return;
 	}
 
 	// Expansion
-	if (fpoints[0] >= frefl) {
+	if (frefl < fpoints[0]) {
 		float exp[2];
 		derivedVector2(&exp[0], f, centroid, gamma, refl, centroid);
 		gtemp = subpixelMemToGeo(exp, f);
 		float fexp = geoDist(&g, &gtemp);
+#ifdef VERBOSE_GEOTOMEM2
 		printf("expanding\n");
+#endif
 		if (fexp < frefl) {
 			memcpy(insimp[2], exp, 2 * sizeof(float));
 			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
@@ -613,7 +613,9 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 		float fcont = geoDist(&g, &gtemp);
 		if (fcont < frefl) {
 			memcpy(insimp[2], cont, 2 * sizeof(float));
+#ifdef VERBOSE_GEOTOMEM2
 			printf("outward contracting\n");
+#endif
 			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
 			return;
 		}
@@ -624,7 +626,9 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 		float fcont = geoDist(&g, &gtemp);
 		if (fcont < fpoints[2]) {
 			memcpy(insimp[2], cont, 2 * sizeof(float));
+#ifdef VERBOSE_GEOTOMEM2
 			printf("inward contracting\n");
+#endif
 			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
 			return;
 		}
@@ -634,7 +638,9 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 	for (uint8_t i = 1; i < 3; i++) {
 		derivedVector2(insimp[i], f, insimp[0], sigma, insimp[i], insimp[0]);
 	}
+#ifdef VERBOSE_GEOTOMEM2
 	printf("shrinking\n");
+#endif
 	simplex2(insimp, g, f, alpha, gamma, rho, sigma);
 	return;
 }

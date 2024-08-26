@@ -7,11 +7,13 @@
 #include <ctype.h>
 #include </usr/local/include/curl/curl.h>
 
+#define VERBOSE_GEOTOMEM2
+
 #define MAX_CSV_ENTRY_LEN 128
-#define GEO_TO_MEM_MAX_ERR_ATML2 0.2 
-#define GEO_TO_MEM_MAX_ERR_MYD09GA 0.005
+#define GEO_TO_MEM_MAX_ERR_ATML2 0.01
+#define GEO_TO_MEM_MAX_ERR_MYD09GA 0.004
 #define GEO_TO_MEM_MAX_ERR_L3SMI 0.2 
-#define GEO_TO_MEM_MAX_ERR_WATER_MASK 0.0008 // theoretically could be lower
+#define GEO_TO_MEM_MAX_ERR_WATER_MASK 0.0002 // theoretically could be lower
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 #define SORT_SCORE_DLAT 1e-4
 #define GEO_TO_MEM_OPOUT 1000 // num loops before we give up ongeoToMem
