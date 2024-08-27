@@ -398,8 +398,10 @@ MemCoord geoToMem2(GeoCoord g, const GeoLocNCFile* const f) {
 	simp[2][1] = f->bounds.x / 2;
 	float* simptemp[3];
 	for (uint8_t i = 0; i < 3; i++) simptemp[i] = &simp[i][0];
-	simplex2(simptemp, g, f, 1, 2, 0.5, 0.5);
-	MemCoord result = {round(simp[0][0]), round(simp[0][1])};
+	simplex2(simptemp, g, f, 1, 2, 0.5, 0.5, 0);
+	MemCoord result;
+	if (simptemp[0][0] == -1) result = (MemCoord){-1u, -1u};
+	else result = (MemCoord){round(simp[0][0]), round(simp[0][1])};
 	return result;
 }
 
@@ -523,8 +525,13 @@ void simplex(MemCoord* insimp, GeoCoord g, const GeoLocNCFile* const f, float al
 	return;
 }
 
-void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma) {
-	// Setup
+void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma, size_t depth) {
+	// Edge Cases
+	if (depth > SIMPLEX_MAX_DEPTH) {
+		insimp[0][0] = -1;
+		return;
+	}
+	/*
 	if (insimp[0][1] == insimp[1][1] 
 		&& insimp[0][0] == insimp[0][0] 
 		&& insimp[0][1] == insimp[2][1]
@@ -532,6 +539,9 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 		printf("converged to point\n");
 		return;
 	}
+	*/
+
+	// Setup
 	GeoCoord gtemp;
 	float fpoints[3];
 	for (uint8_t i = 0; i < 3; i++) {
@@ -580,7 +590,7 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 #ifdef VERBOSE_GEOTOMEM2
 		printf("reflecting\n");
 #endif
-		simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+		simplex2(insimp, g, f, alpha, gamma, rho, sigma, depth + 1);
 		return;
 	}
 
@@ -595,12 +605,12 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 #endif
 		if (fexp < frefl) {
 			memcpy(insimp[2], exp, 2 * sizeof(float));
-			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma, depth + 1);
 			return;
 		}
 		else {
 			memcpy(insimp[2], refl, 2 * sizeof(float));
-			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma, depth + 1);
 			return;
 		}
 	}
@@ -616,7 +626,7 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 #ifdef VERBOSE_GEOTOMEM2
 			printf("outward contracting\n");
 #endif
-			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma, depth + 1);
 			return;
 		}
 	} else {
@@ -629,7 +639,7 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 #ifdef VERBOSE_GEOTOMEM2
 			printf("inward contracting\n");
 #endif
-			simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+			simplex2(insimp, g, f, alpha, gamma, rho, sigma, depth + 1);
 			return;
 		}
 	}
@@ -641,7 +651,7 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 #ifdef VERBOSE_GEOTOMEM2
 	printf("shrinking\n");
 #endif
-	simplex2(insimp, g, f, alpha, gamma, rho, sigma);
+	simplex2(insimp, g, f, alpha, gamma, rho, sigma, depth + 1);
 	return;
 }
 

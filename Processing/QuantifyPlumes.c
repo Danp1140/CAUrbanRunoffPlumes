@@ -26,7 +26,7 @@
 #define MYD09GA_LON_ID 2
 #define MYD09GA_RRS_ID 0
 
-#define WATER_MASK_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/SatelliteData/WaterMasks/30mLARiverMask.nc"
+#define WATER_MASK_FILEPATH "/Users/danp/Desktop/CAUrbanRunoffPlumes/SatelliteData/WaterMasks/"
 #define WATER_MASK_GEOGROUP_ID -1
 #define WATER_MASK_LAT_ID 1
 #define WATER_MASK_LON_ID 2
@@ -53,7 +53,7 @@ typedef enum DataSet {
 
 typedef struct Site {
 	GeoCoord center;
-	const char* outputfilepath, * longname;
+	const char* outputfilepath, * longname, * watermaskfilepath;
 } Site;
 
 const GeoCoord lariver = {33.755, -118.185},
@@ -62,12 +62,27 @@ const GeoCoord lariver = {33.755, -118.185},
 			bcreek = {33.96, -118.46};
 
 #define NUM_SITES 4
-const Site studysites[NUM_SITES] = {
-	{{33.755, -118.185}, OUTPUT_FILEPATH "LARiver.csv", "Los Angeles River"},
-	{{33.74, -118.115}, OUTPUT_FILEPATH "SGRiver.csv", "San Gabriel River"},
-	{{33.63, -117.96}, OUTPUT_FILEPATH "SARiver.csv", "Santa Ana River"},
-	{{33.96, -118.46}, OUTPUT_FILEPATH "BCreek.csv", "Ballona Creek"}
-};
+const Site studysites[NUM_SITES] = {{
+		{33.755, -118.185}, 
+		OUTPUT_FILEPATH "LARiver.csv", 
+		"Los Angeles River",
+		WATER_MASK_FILEPATH "30mLARiverMask.nc"
+	}, {
+		{33.74, -118.115}, 
+		OUTPUT_FILEPATH "SGRiver.csv", 
+		"San Gabriel River",
+		WATER_MASK_FILEPATH "30mSGRiverMask.nc"
+	}, {
+		{33.63, -117.96}, 
+		OUTPUT_FILEPATH "SARiver.csv", 
+		"Santa Ana River",
+		WATER_MASK_FILEPATH "30mSARiverMask.nc"
+	}, {
+		{33.96, -118.46}, 
+		OUTPUT_FILEPATH "BCreek.csv", 
+		"Ballona Creek",
+		WATER_MASK_FILEPATH "30mBCreekMask.nc"
+}};
 
 int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, uint8_t* numfiles);
 
@@ -128,18 +143,19 @@ int main(int argc, char** argv) {
 			MYDATML2_FILEPATH_PREFIX,
 			atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), 
 			&numatml2files),
-		watermaskfile;
+		watermaskfiles[NUM_SITES];
 
-	nc_open(WATER_MASK_FILEPATH, NC_NOWRITE, &watermaskfile);
+	for (uint8_t i = 0; i < NUM_SITES; i++) {
+		nc_open(studysites[i].watermaskfilepath, NC_NOWRITE, &watermaskfiles[i]);
+	}
 
 	GeoLocNCFile glmyd09gafiles[nummyd09gafiles];
 	initGLFiles(&glmyd09gafiles[0], &myd09gafiles[0], nummyd09gafiles, MYD09GA);
 	GeoLocNCFile glatml2files[numatml2files];
 	initGLFiles(&glatml2files[0], &atml2files[0], numatml2files, MYDATML2);
-	GeoLocNCFile glwatermaskfile;
-	initGLFiles(&glwatermaskfile, &watermaskfile, 1, WATER_MASK);
+	GeoLocNCFile glwatermaskfiles[NUM_SITES];
+	initGLFiles(&glwatermaskfiles[0], &watermaskfiles[0], NUM_SITES, WATER_MASK);
 
-	/*
 	printf("MYD09GA (500m, %zu x %zu)\n", glmyd09gafiles[0].bounds.x, glmyd09gafiles[0].bounds.y);
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
 		profileGeoToMem(&glmyd09gafiles[i]);
@@ -148,10 +164,12 @@ int main(int argc, char** argv) {
 	for (uint8_t i = 0; i < numatml2files; i++) {
 		profileGeoToMem(&glatml2files[i]);
 	}
-	printf("Water Mask (30m, %zu x %zu)\n", glwatermaskfile.bounds.x, glwatermaskfile.bounds.y);
-	profileGeoToMem(&glwatermaskfile);
-	*/
+	printf("Water Mask (30m, %zu x %zu)\n", glwatermaskfiles[0].bounds.x, glwatermaskfiles[0].bounds.y);
+	for (uint8_t i = 0; i < NUM_SITES; i++) {
+		profileGeoToMem(&glwatermaskfiles[i]);
+	}
 
+	/*
 	FILE* outputs[NUM_SITES];
 	for (uint8_t i = 0; i < NUM_SITES; i++) outputs[i] = fopen(studysites[i].outputfilepath, "a");
 
@@ -168,7 +186,7 @@ int main(int argc, char** argv) {
 				&glmyd09gafiles[i], 
 				&glatml2files[0], 
 				numatml2files, 
-				&glwatermaskfile,
+				&glwatermaskfiles[k],
 				(void*)(&cutoff), 
 				&studysites[k].center, 
 				STUDY_AREA_RADIUS, 
@@ -210,6 +228,7 @@ int main(int argc, char** argv) {
 
 	fclose(uselessfilelist);
 	for (uint8_t i = 0; i < NUM_SITES; i++) fclose(outputs[i]);
+	*/
 
 	for (uint8_t i = 0; i < numatml2files; i++) {
 		nc_close(atml2files[i]);
@@ -220,7 +239,9 @@ int main(int argc, char** argv) {
 	}
 	free(myd09gafiles);
 
-	nc_close(watermaskfile);
+	for (uint8_t i = 0; i < NUM_SITES; i++) {
+		nc_close(watermaskfiles[i]);
+	}
 
 	return 0;
 }
@@ -687,4 +708,14 @@ void profileGeoToMem(const GeoLocNCFile* const file) {
 	m2 = geoToMem2(g, file);
 	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
 	else printf("middle off by {%d, %d}\n", (int)m2.x - (int)m1.x, (int)m2.y - (int)m1.y);
+
+	g = (GeoCoord){0, -150}; 
+	m2 = geoToMem2(g, file);
+	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
+	else printf("should've been out of bounds (lower left)\n");
+	g = (GeoCoord){60, 0}; 
+	m2 = geoToMem2(g, file);
+	if (m2.x == -1u || m2.y == -1u) printf("out of bounds\n");
+	else printf("should've been out of bounds (upper right)\n");
+
 }

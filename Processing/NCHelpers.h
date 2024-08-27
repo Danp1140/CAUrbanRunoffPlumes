@@ -7,7 +7,7 @@
 #include <ctype.h>
 #include </usr/local/include/curl/curl.h>
 
-#define VERBOSE_GEOTOMEM2
+// #define VERBOSE_GEOTOMEM2
 
 #define MAX_CSV_ENTRY_LEN 128
 #define GEO_TO_MEM_MAX_ERR_ATML2 0.01
@@ -17,6 +17,7 @@
 #define GEO_TO_MEM2_STEP 1. // must be >= 1
 #define SORT_SCORE_DLAT 1e-4
 #define GEO_TO_MEM_OPOUT 1000 // num loops before we give up ongeoToMem
+#define SIMPLEX_MAX_DEPTH 100
 
 typedef struct GeoCoord {
 	float lat, lon;
@@ -112,7 +113,7 @@ MemCoord geoToMem2(GeoCoord g, const GeoLocNCFile* const f);
 
 void simplex(MemCoord* insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma);
 
-void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma);
+void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma, size_t depth);
 
 size_t sizeTypeSub(size_t lhs, size_t rhs);
 
