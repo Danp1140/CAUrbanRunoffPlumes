@@ -42,6 +42,7 @@ def deleteFiles(year):
     print("deleting MYD09GA for " + str(year))
     subprocess.run(["rm", "-r", "../SatelliteData/AquaMODIS/MYD09GA/" + str(year)])
 
+"""
 subprocess.run(["rm", "Data/LARiver.csv"])
 subprocess.run(["rm", "Data/SGRiver.csv"])
 subprocess.run(["rm", "Data/SARiver.csv"])
@@ -54,8 +55,9 @@ with open("Data/SARiver.csv", 'w') as f:
     csv.writer(f).writerow(["Date", "MYD09GA Area (km^2)", "MYD09GA Avg. Intensity (refl/km^2)"])
 with open("Data/BCreek.csv", 'w') as f:
     csv.writer(f).writerow(["Date", "MYD09GA Area (km^2)", "MYD09GA Avg. Intensity (refl/km^2)"])
+    """
 
-for y in range(2004, 2024):
+for y in range(2011, 2024):
     downloads = downloadInBackground(y) 
     if y != 2004:
         processForRainDaysPlusN(3, y - 1)

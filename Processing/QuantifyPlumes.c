@@ -156,6 +156,7 @@ int main(int argc, char** argv) {
 	GeoLocNCFile glwatermaskfiles[NUM_SITES];
 	initGLFiles(&glwatermaskfiles[0], &watermaskfiles[0], NUM_SITES, WATER_MASK);
 
+	/*
 	printf("MYD09GA (500m, %zu x %zu)\n", glmyd09gafiles[0].bounds.x, glmyd09gafiles[0].bounds.y);
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
 		profileGeoToMem(&glmyd09gafiles[i]);
@@ -168,8 +169,8 @@ int main(int argc, char** argv) {
 	for (uint8_t i = 0; i < NUM_SITES; i++) {
 		profileGeoToMem(&glwatermaskfiles[i]);
 	}
+	*/
 
-	/*
 	FILE* outputs[NUM_SITES];
 	for (uint8_t i = 0; i < NUM_SITES; i++) outputs[i] = fopen(studysites[i].outputfilepath, "a");
 
@@ -191,7 +192,18 @@ int main(int argc, char** argv) {
 				&studysites[k].center, 
 				STUDY_AREA_RADIUS, 
 				&n);
-			if (n > 0) {
+			if (n == -1u) {
+				size_t len;
+				nc_inq_path(glmyd09gafiles[i].fileid, &len, NULL);
+				char path[len];
+				nc_inq_path(glmyd09gafiles[i].fileid, NULL, path);
+				char* pathptr = strrchr(path, '/') + 1;
+				// little jank but we need to write a newline, not a null terminator
+				size_t pathlen = strlen(pathptr);
+				pathptr[pathlen - 1] = '\n';
+				fwrite(pathptr, pathlen, 1, uselessfilelist);
+			}
+			else if (n > 0) {
 				rowtemp.plumearea[0] = 0;
 				rowtemp.avgintensity[0] = 0;
 				for (size_t j = 0; j < n; j++) {
@@ -210,25 +222,13 @@ int main(int argc, char** argv) {
 				asprintf(&msg, "MYD09GA %s mask %zu pixels large", studysites[k].longname, n);
 				printBox(msg);
 				free(msg);
+				free(raster);
 			}
-			else {
-				size_t len;
-				nc_inq_path(glmyd09gafiles[i].fileid, &len, NULL);
-				char path[len];
-				nc_inq_path(glmyd09gafiles[i].fileid, NULL, path);
-				char* pathptr = strrchr(path, '/') + 1;
-				// little jank but we need to write a newline, not a null terminator
-				size_t pathlen = strlen(pathptr);
-				pathptr[pathlen - 1] = '\n';
-				fwrite(pathptr, pathlen, 1, uselessfilelist);
-			}
-			if (raster) free(raster);
 		}
 	}
 
 	fclose(uselessfilelist);
 	for (uint8_t i = 0; i < NUM_SITES; i++) fclose(outputs[i]);
-	*/
 
 	for (uint8_t i = 0; i < numatml2files; i++) {
 		nc_close(atml2files[i]);
@@ -410,6 +410,10 @@ void initCloudMaps(BakedGeoLocNCFile* dst, GeoLocNCFile* files, const uint8_t nu
 	printf("done\n");
 }
 
+// returns NULL if there are no rasterized pixels (whether none are worthy or the satellite image is
+// out of range
+// if none are worth, numpixels comes back 0
+// if the image doesn't contain the whole study area, numpixels comes back -1u
 MemCoord* calcCutoffRaster(
 	const GeoLocNCFile* const file, 
 	const GeoLocNCFile* const clouds, 
@@ -424,18 +428,28 @@ MemCoord* calcCutoffRaster(
 	MemCoord memcenter = geoToMem(*center, file);
 	if (memcenter.x == -1u || memcenter.y == -1u) {
 		printf("center outside of image\n");
+		*numpixels = -1u;
 		return NULL;
 	}
 	const size_t pixelradius = STUDY_AREA_RADIUS / file->scale;
-	const size_t pixelmargin = CUTOFF_RASTER_BBOX_MARGIN / file->scale;
+	const size_t pixelmargin = pixelradius + CUTOFF_RASTER_BBOX_MARGIN / file->scale;
 	MemCoord extent = {
-		memcenter.y + pixelradius + pixelmargin, 
-		memcenter.x + pixelradius + pixelmargin
+		memcenter.y + pixelmargin, 
+		memcenter.x + pixelmargin
 	};
 	MemCoord origin = {
-		memcenter.y - pixelradius - pixelmargin, 
-		memcenter.x - pixelradius - pixelmargin
+		memcenter.y - pixelmargin, 
+		memcenter.x - pixelmargin
 	};
+	// since these are size_t's (unsigned), origin OOB (< 0) will just be a huge number
+	// so we do a more accurate pre-subtraction comparison down here
+	if (extent.x > file->bounds.x || extent.y > file->bounds.y
+		|| memcenter.x < pixelmargin || memcenter.y < pixelmargin) {
+		printf("some area of bounding box out of satellite image\n");
+		*numpixels = -1u;
+		return NULL;
+	}
+	/*
 	if (extent.x > file->bounds.x) extent.x = file->bounds.x - 1;
 	if (extent.y > file->bounds.y) extent.y = file->bounds.y - 1;
 	if (origin.x < 0) origin.x = 0; 
@@ -447,11 +461,13 @@ MemCoord* calcCutoffRaster(
 		printf("study radius completely outside satellite image\n");
 		return NULL;
 	}
+	*/
 
 	// TODO: re-evaluate neccesity after swapping to pixel instead of degree radius
 	// we do a little swapping to make sure they're where we expect them to be in memory
 	// since they're definitely extreme bounds, we're really just making sure we can
 	// iterate predicatably
+	/*
 	if (extent.x < origin.x) {
 		size_t temp = extent.x;
 		extent.x = origin.x;
@@ -462,6 +478,7 @@ MemCoord* calcCutoffRaster(
 		extent.y = origin.y;
 		origin.y = temp;
 	}
+	*/
 	size_t maxarea = (extent.x - origin.x) * (extent.y - origin.y);
 	MemCoord* result = (MemCoord*)malloc(sizeof(MemCoord) * maxarea);
 
@@ -471,7 +488,7 @@ MemCoord* calcCutoffRaster(
 	nc_inq_vartype(file->fileid, file->keyvarid, &type);
 	int store;
 	char datatemp[4]; // facilitates moving up to 32 bytes of data
-	unsigned char cloudbyte;
+	int32_t cloudint;
 	float waterdst;
 	size_t cloudcounter;
 	int clear;
@@ -485,7 +502,8 @@ MemCoord* calcCutoffRaster(
 	for (current.y = origin.y; current.y < extent.y; current.y++) {
 		for (current.x = origin.x; current.x < extent.x; current.x++) {
 			gtemp = memToGeo(current, file);
-			if (sqrt(pow((float)current.x - (float)memcenter.x, 2) + pow((float)current.y - (float)memcenter.y, 2)) < pixelradius) {
+			if (sqrt(pow((float)current.x - (float)memcenter.x, 2) 
+				+ pow((float)current.y - (float)memcenter.y, 2)) < pixelradius) {
 				totalinradius++;
 				mtemp = geoToMem(gtemp, water);
 				nc_get_var1_float(
@@ -504,14 +522,13 @@ MemCoord* calcCutoffRaster(
 					if (cloudmcoord.m.x == -1u || cloudmcoord.m.y == -1u) {
 						continue;
 					}
-					// TODO: Cloud_Mask is actually an NC_INT for some reason
-					nc_get_var1_ubyte(
+					nc_get_var1_int(
 						clouds[cloudcounter].fileid, 
 						clouds[cloudcounter].keyvarid, 
 						&cloudmcoord.byte, 
-						&cloudbyte);
+						&cloudint);
 					// if determined and either cloudy or uncertain, don't store
-					if (cloudbyte & (ATML2_DETERMINED_BIT | ATML2_UNCERTAIN_BIT)) clear = 1;
+					if (cloudint & (ATML2_DETERMINED_BIT | ATML2_UNCERTAIN_BIT)) clear = 1;
 					else clear = 0;
 				}
 				if (clear == 0) {
@@ -534,7 +551,7 @@ MemCoord* calcCutoffRaster(
 						(short*)(&datatemp[0]));
 					if (*((short*)(&datatemp[0])) > (*((short*)(cutoff)))) store = 1;
 				}
-				if (store) {
+				if (store || waterdst == 0) {
 					result[*numpixels] = current;
 					(*numpixels)++;
 					// ideally this check would never be needed, but its not much overhead

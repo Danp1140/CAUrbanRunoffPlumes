@@ -119,7 +119,7 @@ def downloadLAADSForDay(year, month, day, apiurl, folderprefix, latname, lonname
         logError(str(datetime.datetime.now()) + " | JSON didn't work out, probably got an empty response back\nWas working on " + str(year) + "/" + str(month) + "/" + str(day) + "\nFrom decoded response:\n"
                  + response.read().decode() + "\n")
         # not sure why we dont return or continue here
-    with open("../../Processing/useless.txt") as uselessfilelist:
+    with open("/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/useless.txt") as uselessfilelist:
         for key in jsonresp:
             useless = False
             for l in uselessfilelist:

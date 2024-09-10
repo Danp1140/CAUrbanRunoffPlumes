@@ -575,7 +575,10 @@ void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alp
 		}
 	}
 	gtemp = subpixelMemToGeo(insimp[0], f);
-	if (geoDist(&g, &gtemp) <= f->maxgeotomemerr) return;
+	if (geoDist(&g, &gtemp) <= f->maxgeotomemerr) {
+		printf("deph %zu\n", depth);
+		return;
+	}
 	float centroid[2] = {insimp[0][0] + (insimp[1][0] - insimp[0][0]) / 2, insimp[0][1] + (insimp[1][1] - insimp[0][1]) / 2};
 
 	// for (uint8_t i = 0; i < 3; i++) printf("[%d]: {%f, %f} => %f\n", (int)i, insimp[i][1], insimp[i][0], fpoints[i]);
