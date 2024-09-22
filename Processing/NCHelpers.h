@@ -40,29 +40,6 @@ typedef struct GeoLocNCFile {
 	size_t latoffset, lonoffset; // used for indexing lat/lon data regardless of if they're 2d or 1d
 } GeoLocNCFile;
 
-typedef struct MemGeoPair {
-	MemCoord m;
-	GeoCoord g;
-} MemGeoPair;
-
-typedef struct BakedGeoLocNCFile {
-	GeoLocNCFile child;
-	MemGeoPair* pairs; 
-	size_t numpairs, pairssize;
-} BakedGeoLocNCFile;
-
-float sortScore(const GeoCoord* g);
-
-void initBakedFile(BakedGeoLocNCFile* f, size_t n);
-
-void shrinkBakedFile(BakedGeoLocNCFile* f);
-
-void push(BakedGeoLocNCFile* f, MemGeoPair p);
-
-MemGeoPair* find(MemGeoPair* p, size_t np, GeoCoord g);
-
-MemCoord search(const BakedGeoLocNCFile* f, const GeoCoord g);
-
 // Note: this only prints attributes for variables, not for groups
 void printInfo(int id, int printattribs);
 
@@ -96,8 +73,6 @@ GeoCoord geoSub(const GeoCoord* const lhs, const GeoCoord* const rhs);
 
 size_t* memData(MemCoord* m);
 
-// TODO: add out-of-range checks for memToGeo & geoToMem
-
 GeoCoord _memToGeo(MemCoord m, const int geogroup, const int latvar, const int lonvar);
 
 GeoCoord memToGeo(MemCoord m, const GeoLocNCFile* const f);
@@ -107,20 +82,28 @@ GeoCoord subpixelMemToGeo(float* m, const GeoLocNCFile* const f);
 // TODO: phase out in favor of below version using GeoLocNCFile arg (same with memToGeo)
 MemCoord _geoToMem(GeoCoord g, const int geogroup, const int latvar, const int lonvar);
 
+// simple gradient-descent geoToMem sampler
 MemCoord geoToMem(GeoCoord g, const GeoLocNCFile* const f);
 
+// Nelder-Mead geoToMem sampler (recommended for accuracy, speed varies by file)
 MemCoord geoToMem2(GeoCoord g, const GeoLocNCFile* const f);
 
+// recursive call, finding new Nelder-Mead simplex and returning after max error or max recursion has been reached
 void simplex(MemCoord* insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma);
 
+// subpixel version of simplex
 void simplex2(float** insimp, GeoCoord g, const GeoLocNCFile* const f, float alpha, float gamma, float rho, float sigma, size_t depth);
 
+// ordinary subtraction, but clamps bottom end to 0 to avoid unsigned underflow
 size_t sizeTypeSub(size_t lhs, size_t rhs);
 
+// vector math op for use in simplex
 MemCoord derivedVector(const GeoLocNCFile* const f, const MemCoord* const centroid, float m, const MemCoord* const v1, const MemCoord* const v2);
 
+// subpixel version of derivedVector
 void derivedVector2(float* dst, const GeoLocNCFile* const f, const float* const centroid, float m, const float* const v1, const float* const v2);
 
+// for use in sorting simplex points by fitness in simplex
 int fcomp(const void* lhs, const void* rhs);
 
 char** formulateMYDATML2URLs(uint16_t year, uint8_t month, uint8_t day, size_t* numurls);

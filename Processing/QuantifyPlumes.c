@@ -88,15 +88,11 @@ int* openNCFile(const char* prefix, uint16_t year, uint8_t month, uint8_t day, u
 
 void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet d);
 
-void initCloudMaps(BakedGeoLocNCFile* dst, GeoLocNCFile* files, const uint8_t numfiles);
-
 /*
  * Returns a heap-allocated array of memory coordinates at which the variable at varid
  * within the file/group at file is greater than cutoff. Note that current implementation
  * only works for float variables, as it calls nc_get_var1_float. Calculates this within a
  * circle with the given radius (in º) and center.
- * 
- * TODO: remove radius arg, we're just gonna use the macro for every dataset (as writePlumeRaster does)
  */
 MemCoord* calcCutoffRaster(
 	const GeoLocNCFile* const file, 
@@ -128,6 +124,7 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
+	/* Opening relevent files */
 	uint16_t year = atoi(argv[1]);
 	uint8_t month = atoi(argv[2]),
 		day = atoi(argv[3]);
@@ -156,6 +153,7 @@ int main(int argc, char** argv) {
 	GeoLocNCFile glwatermaskfiles[NUM_SITES];
 	initGLFiles(&glwatermaskfiles[0], &watermaskfiles[0], NUM_SITES, WATER_MASK);
 
+	/* Debugging block to profile geoToMem function efficiency and accuracy */
 	/*
 	printf("MYD09GA (500m, %zu x %zu)\n", glmyd09gafiles[0].bounds.x, glmyd09gafiles[0].bounds.y);
 	for (uint8_t i = 0; i < nummyd09gafiles; i++) {
@@ -175,6 +173,8 @@ int main(int argc, char** argv) {
 	for (uint8_t i = 0; i < NUM_SITES; i++) outputs[i] = fopen(studysites[i].outputfilepath, "a");
 
 	FILE* uselessfilelist = fopen(USELESS_FILE_LIST_FILEPATH, "a");
+
+	/* Quantifying plume for each site and each product */
 
 	size_t n;
 	short cutoff = 1000;
@@ -227,6 +227,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
+	/* Closing all opened files */
 	fclose(uselessfilelist);
 	for (uint8_t i = 0; i < NUM_SITES; i++) fclose(outputs[i]);
 
@@ -353,7 +354,7 @@ void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet 
 		if (nlatdims == nlondims) {
 			size_t dimlen;
 			if (nlatdims == 2) {
-				// for some reason y is stored before x
+				// y is typically stored before x in NC files 
 				// this assumes dims are always stored y-res @ 0, x-res @ 1
 				nc_inq_dimlen(dst[i].geogroupid, latdimids[0], &dimlen);
 				dst[i].bounds.y = dimlen;
@@ -362,7 +363,7 @@ void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet 
 				dst[i].latoffset = 0;
 				dst[i].lonoffset = 0;
 			}
-			// if ndims == 1, we'll assume a L3SMI-style lin indep lat & lon
+			// if ndims == 1, we'll assume a L3SMI-style linearly independant lat & lon
 			else if (nlatdims == 1) {
 				if (latdimids[0] < londimids[0]) {
 					dst[i].lonoffset = 1;
@@ -385,34 +386,9 @@ void initGLFiles(GeoLocNCFile* dst, int* files, const uint8_t numfiles, DataSet 
 	}
 }
 
-void initCloudMaps(BakedGeoLocNCFile* dst, GeoLocNCFile* files, const uint8_t numfiles) {
-	MemCoord m;
-	GeoCoord g, g2;
-	float s;
-	for (uint8_t i = 0; i < numfiles; i++) {
-		initBakedFile(&dst[i], files[i].bounds.x * files[i].bounds.y);
-		for (m.y = 0; m.y < files[i].bounds.y; m.y++) {
-			for (m.x = 0; m.x < files[i].bounds.x; m.x++) {
-				g = memToGeo(m, &files[i]);
-				s = sortScore(&g);
-				push(&dst[i], (MemGeoPair){m, g});
-				if (s != 0.0) {
-					g2 = find(dst[i].pairs, dst[i].numpairs, g)->g;
-					if (g.lat != g2.lat || g.lon != g2.lon) printf("\033[101;97m");
-					printf("{%f, %f} transformed to {%f, %f}", g.lat, g.lon, g2.lat, g2.lon);
-					if (g.lat != g2.lat || g.lon != g2.lon) printf("\033[0m");
-					printf("\n");
-				}
-			}
-		}
-		shrinkBakedFile(&dst[i]);
-	}
-	printf("done\n");
-}
-
 // returns NULL if there are no rasterized pixels (whether none are worthy or the satellite image is
 // out of range
-// if none are worth, numpixels comes back 0
+// if none are worthy, numpixels comes back 0
 // if the image doesn't contain the whole study area, numpixels comes back -1u
 MemCoord* calcCutoffRaster(
 	const GeoLocNCFile* const file, 
@@ -449,36 +425,7 @@ MemCoord* calcCutoffRaster(
 		*numpixels = -1u;
 		return NULL;
 	}
-	/*
-	if (extent.x > file->bounds.x) extent.x = file->bounds.x - 1;
-	if (extent.y > file->bounds.y) extent.y = file->bounds.y - 1;
-	if (origin.x < 0) origin.x = 0; 
-	if (origin.y < 0) origin.y = 0; 
 
-	if (extent.x == -1u || origin.y == -1u) { // out-of-range extent or origin
-						  // technically this doesn't make full use of our data, we can
-						  // come back to this later, instead locking to min/max
-		printf("study radius completely outside satellite image\n");
-		return NULL;
-	}
-	*/
-
-	// TODO: re-evaluate neccesity after swapping to pixel instead of degree radius
-	// we do a little swapping to make sure they're where we expect them to be in memory
-	// since they're definitely extreme bounds, we're really just making sure we can
-	// iterate predicatably
-	/*
-	if (extent.x < origin.x) {
-		size_t temp = extent.x;
-		extent.x = origin.x;
-		origin.x = temp;
-	}
-	if (extent.y < origin.y) {
-		size_t temp = extent.y;
-		extent.y = origin.y;
-		origin.y = temp;
-	}
-	*/
 	size_t maxarea = (extent.x - origin.x) * (extent.y - origin.y);
 	MemCoord* result = (MemCoord*)malloc(sizeof(MemCoord) * maxarea);
 
@@ -487,7 +434,7 @@ MemCoord* calcCutoffRaster(
 	nc_type type;
 	nc_inq_vartype(file->fileid, file->keyvarid, &type);
 	int store;
-	char datatemp[4]; // facilitates moving up to 32 bytes of data
+	char datatemp[4]; // just a 32-byte buffer 
 	int32_t cloudint;
 	float waterdst;
 	size_t cloudcounter;
@@ -527,7 +474,6 @@ MemCoord* calcCutoffRaster(
 						clouds[cloudcounter].keyvarid, 
 						&cloudmcoord.byte, 
 						&cloudint);
-					// if determined and either cloudy or uncertain, don't store
 					if (cloudint & (ATML2_DETERMINED_BIT | ATML2_UNCERTAIN_BIT)) clear = 1;
 					else clear = 0;
 				}
@@ -585,12 +531,11 @@ MemCoord* calcCutoffRaster(
 	}
 	result = realloc(result, sizeof(MemCoord) * *numpixels);
 	
-	// troubleshooting filewrite, should not write every analysis file i dont think
+	/*
 	size_t len;
 	nc_inq_path(file->fileid, &len, NULL);
 	char path[len];
 	nc_inq_path(file->fileid, NULL, path);
-	// this is a really janky way to do this but since this is just a debugging measure its whatever
 	char* template;
 	if (center->lat == lariver.lat) {
 		template = "/Users/danp/Desktop/CAUrbanRunoffPlumes/Processing/%s/lariver_%s";
@@ -617,6 +562,7 @@ MemCoord* calcCutoffRaster(
 	printf("%s\n", filepath);
 	writePlumeRaster(result, *numpixels, origin, extent, &filepath[0], file);
 	free(filepath);
+	*/
 
 	return result;
 }
@@ -681,7 +627,6 @@ void writePlumeRaster(
 		nc_get_var1_short(src->fileid, 0, memData(&raster[i]), &temp);
 		c = (MemCoord){raster[i].y - origin.y, raster[i].x - origin.x};
 		nc_put_var1_short(result.fileid, varid, memData(&c), &temp);
-		// printf("pixel at {%zu, %zu} written as %d\n", c.x, c.y, temp);
 	}
 	free(latdst);
 	free(londst);

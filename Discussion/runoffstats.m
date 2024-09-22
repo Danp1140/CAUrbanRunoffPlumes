@@ -1,13 +1,10 @@
-% what intermediate data should we bother showing?
-% how busy is too busy?
-
-studyyears = 2004 : 2022;
+studyyears = 2004 : 2023;
 
 rain = readtimetable("../SatelliteData/AquaMODIS/LAXPrcpDataTemp.csv");
 rain.DATE = rain.DATE + years(2000); % 2-digit year in csv is misinterpreted
 
 for i = length(rain.DATE) : -1 : 1
-	if (year(rain.DATE(i)) < 2004) || (year(rain.DATE(i)) > 2022)
+	if (year(rain.DATE(i)) < 2004) || (year(rain.DATE(i)) > 2023)
 		rain(i, :) = [];
 	end
 end
@@ -17,10 +14,10 @@ rainamts = retime(rain(:, "PRCP"), 'yearly', @mean);
 meanrain = mean(rain.PRCP);
 
 sites = {
-	readtimetable("../Processing/Data/LARiverBackup8-30.csv")
-	readtimetable("../Processing/Data/SGRiverBackup8-30.csv")
-	readtimetable("../Processing/Data/SARiverBackup8-30.csv")
-	readtimetable("../Processing/Data/BCreekBackup8-30.csv")
+	readtimetable("../Processing/Data/LARiver.csv")
+	readtimetable("../Processing/Data/SGRiver.csv")
+	readtimetable("../Processing/Data/SARiver.csv")
+	readtimetable("../Processing/Data/BCreek.csv")
 };
 
 colors = [
@@ -90,20 +87,28 @@ end
 % title("Count of Rain Events and Detected Plumes")
 
 %% Rain Amount Versus Average Plume Size (Scatter Plot)
+scatters = [];
+yoffsets = [-5, 5, 0, 10]; % custom offsets to avoid label overlap
 figure
 hold on
 for i = 1 : length(sites)
     m = fitlm(rainamts.PRCP, sizeavgs{i});
     r2 = m.Rsquared.Ordinary;
     [rho, pval] = corr(rainamts.PRCP, sizeavgs{i});
-    plot(rainamts.PRCP, sizeavgs{i}, 'o', 'MarkerFaceColor', colors(i))
+    scatters = [scatters, plot(rainamts.PRCP, sizeavgs{i}, 'o', 'MarkerFaceColor', colors(i))];
     a = sort(rainamts.PRCP, 1, 'ascend');
     p = plot([0, a(end)], ...
         [m.Coefficients.Estimate(1), m.Coefficients.Estimate(1) + m.Coefficients.Estimate(2) * a(end)], ...
         'Color', colors(i));
-    text(p.XData(end), p.YData(end), "r^2 = " + r2 + newline + "\rho = " + rho);
+    text(p.XData(end) + 0.5, p.YData(end) + yoffsets(i), "r^2 = " + r2 + newline + "\rho = " + rho);
 end
 hold off
+title("Yearly average rainfall versus average plume size")
+legend(scatters, ["Los Angeles River", "San Gabriel River", "Santa Ana River", "Ballona Creek"], ...
+    'Location', 'northwest')
+xlabel("Rainfall (mm)")
+ylabel("Size (km^2)")
+xlim([floor(min(rainamts.PRCP)) - 1, ceil(max(rainamts.PRCP)) + 1])
 
 %% Adjusted for # eventso
 % maxnumrains = max(numrains).(1);
@@ -142,7 +147,7 @@ hold off
 title("Normalized yearly average plume sizes & intensities")
 legend(["Los Angeles River", "San Gabriel River", "Santa Ana River", "Ballona Creek"], ...
     'Location', 'northeast')
-ylabel("ize (km^2/mm)")
+ylabel("Size (km^2/mm)")
 set(gca, 'XTick', [])
 nexttile
 hold on
@@ -156,20 +161,23 @@ ylabel("Intensity (refl/(km^2*mm))")
 
 
 %% T-Test for 2013 Spike Significance
-% Note: Below is just for site 1 rn
 fprintf("2013 anomaly stats\n")
 for i = 1 : length(sites) 
     fprintf("site %d", i)
     pop1 = [];
+    pop1int = [];
     for j = 1 : length(sites{i}.Date)
         if year(sites{i}.Date(j)) < 2013
             pop1 = [pop1, sites{i}.MYD09GAArea_km_2_(j)];
+            pop1int = [pop1int, sites{i}.MYD09GAAvg_Intensity_refl_km_2_(j)];
         end
     end
     pop2 = [];
+    pop2int = [];
     for j = 1 : length(sites{i}.Date)
         if year(sites{i}.Date(j)) > 2013
             pop2 = [pop2, sites{i}.MYD09GAArea_km_2_(j)];
+            pop2int = [pop2int, sites{i}.MYD09GAAvg_Intensity_refl_km_2_(j)];
         end
     end
     xbar = mean(pop2) - mean(pop1);
@@ -178,7 +186,9 @@ for i = 1 : length(sites)
     [tval, pval] = ttest2(pop1, pop2);
     fprintf("\tz-score: %1.4f\n", z)
     fprintf("\tp from z-score: %1.4f\n", 2 * (1 - normcdf(z)))
-    fprintf("\tp from t test: %1.4f\n", pval)
+    fprintf("\tp from t test on size: %1.4f\n", pval)
+    [tval, pval] = ttest2(pop1int, pop2int);
+    fprintf("\tp from t test on int: %1.4f\n", pval)
 end
 % temp = sites{1};
 % pop1 = [];

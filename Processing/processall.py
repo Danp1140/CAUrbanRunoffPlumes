@@ -57,6 +57,7 @@ with open("Data/BCreek.csv", 'w') as f:
     csv.writer(f).writerow(["Date", "MYD09GA Area (km^2)", "MYD09GA Avg. Intensity (refl/km^2)"])
     """
 
+"""
 for y in range(2011, 2024):
     downloads = downloadInBackground(y) 
     if y != 2004:
@@ -65,4 +66,6 @@ for y in range(2011, 2024):
     # wait on download to finish before advancing to download next year and process just downloaded
     for d in downloads:
         d.communicate()
+        """
 
+processForRainDaysPlusN(3, 2023)
